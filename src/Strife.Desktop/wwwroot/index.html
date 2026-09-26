@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark"><title>Strife</title>
+  <link rel="stylesheet" href="app.css"><script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="appbar">
+    <div class="brand"><span class="brand-mark">S</span> STRIFE <span class="tagline">VOICE + VIDEO</span></div>
+    <div class="appbar-right"><span id="engine-label" class="muted">Starting voice engine…</span>
+      <details id="menu" class="menu"><summary>☰ Menu</summary><nav aria-label="Application menu">
+        <button data-native="settings">Voice settings &amp; shortcuts <small>Devices, RNNoise, PTT, output, network</small></button>
+        <button data-native="wizard">Audio setup wizard</button>
+        <button data-native="certificate">Certificate &amp; identity</button>
+        <hr><button id="video-settings-menu">Helltube server</button><button id="retry-engine">Retry voice engine</button><hr><button id="quit">Quit Strife</button>
+      </nav></details>
+    </div>
+  </header>
+  <div id="notice" class="notice" role="alert" hidden><span id="notice-text"></span><button id="dismiss-notice" aria-label="Dismiss notification">×</button></div>
+  <main id="workspace">
+    <aside class="voice-pane" aria-label="Voice channels">
+      <div class="section-heading"><span class="eyebrow">YOUR SERVER</span><span id="connection-dot" class="dot"></span></div>
+      <h1 id="server-name">Find your people.</h1><p id="server-description" class="muted">Connect to any Mumble server.</p>
+      <button id="connect-button" class="primary">＋ Connect to server</button><button id="disconnect-button" hidden>Disconnect</button>
+      <label class="search">⌕ <input id="channel-search" type="search" placeholder="Find a channel" aria-label="Find a channel"></label>
+      <div class="section-heading"><span class="eyebrow">VOICE CHANNELS</span><span id="user-count" class="muted">0 online</span></div>
+      <div id="channel-tree" class="channel-tree" role="tree" aria-label="Server channel tree"></div>
+      <div id="voice-empty" class="voice-empty"><span>◌</span><strong>A place to hang out</strong><p>Your channels and friends will appear here once you connect.</p></div>
+      <footer class="voice-footer">
+        <div class="identity"><span class="avatar" id="self-avatar">S</span><div><strong id="self-name">Not connected</strong><small id="transmit-status">Microphone offline</small></div></div>
+        <div class="voice-controls"><button id="mute-button" aria-pressed="false" disabled>♩ <span>Mute</span></button><button id="deafen-button" aria-pressed="false" disabled>◖◗ <span>Deafen</span></button><button data-native="settings" aria-label="Voice settings">⚙</button></div>
+        <div class="noise-status"><span id="noise-dot" class="dot"></span><span id="noise-label">Waiting for voice engine</span></div>
+        <button id="ptt-hint" class="text-button" data-native="settings">Set a global PTT bind in Shortcuts ↗</button>
+      </footer>
+    </aside>
+    <section id="chat-pane" class="chat-pane" aria-label="Mumble chat">
+      <header class="pane-header"><strong><span class="accent">#</span> Voice chat</strong><button id="collapse-chat" class="icon-button" aria-label="Collapse chat" aria-expanded="true">‹</button></header>
+      <div class="chat-content">
+        <div class="chat-intro"><span class="eyebrow">THE CONVERSATION</span><h2 id="chat-channel">Say hello.</h2><p class="muted">Messages from your Mumble server.</p></div>
+        <div id="chat-log" role="log" aria-live="polite" aria-label="Mumble messages"></div>
+        <form id="chat-form"><label class="sr-only" for="chat-message">Message your current voice channel</label><textarea id="chat-message" rows="2" maxlength="5000" placeholder="Message your voice channel…" disabled></textarea><div class="composer-bottom"><small id="chat-target">Connect to start chatting</small><button id="send-chat" class="icon-button" type="submit" aria-label="Send message" disabled>↑</button></div></form>
+      </div>
+      <button id="expand-chat" class="expand-chat" aria-label="Expand chat" aria-expanded="false" hidden><span>›</span><span class="vertical-label">CHAT</span><span id="unread-dot" class="dot live" hidden></span></button>
+    </section>
+    <section class="video-pane" aria-label="Helltube video sharing">
+      <header class="pane-header"><div class="video-title"><span class="video-mark">▶</span><strong>Helltube</strong><span class="muted">Watch together.</span></div><div class="video-actions"><button id="reload-video" class="icon-button" aria-label="Reload Helltube">↻</button><button id="video-settings">Server ↗</button></div></header>
+      <div class="video-surface"><iframe id="helltube" title="Helltube watch-together interface" referrerpolicy="no-referrer" allow="autoplay; fullscreen; display-capture; clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-popups" allowfullscreen></iframe>
+        <div id="video-welcome" class="video-welcome"><span class="large-play">▶</span><span class="eyebrow">BETTER IN COMPANY</span><h2>The same screen.<br>The same moment.</h2><p>Bring your Helltube server into the room.<br>Keep the conversation going alongside it.</p><button id="video-welcome-connect" class="primary">Connect Helltube ↗</button></div>
+      </div>
+      <footer class="video-footer"><span><span class="dot live"></span> <span id="video-address">Choose your Helltube server</span></span><button id="video-help" class="text-button">Connection help</button></footer>
+    </section>
+  </main>
+  <dialog id="connect-dialog">
+    <form id="connect-form"><div class="dialog-heading"><span class="eyebrow">MUMBLE CONNECTION</span><button type="button" class="icon-button close-dialog" aria-label="Close">×</button></div><h2>Join the conversation.</h2><p class="muted">Connect to an existing Mumble / Murmur server.</p>
+      <div class="form-row"><label class="grow">Server address<input id="host" placeholder="voice.example.com" required maxlength="253" autocomplete="off"></label><label class="port-field">Port<input id="port" type="number" min="1" max="65535" value="64738" required></label></div>
+      <label>Username<input id="username" required maxlength="128" autocomplete="username"></label><label>Server password (optional)<input id="password" type="password" maxlength="1024" autocomplete="off"></label>
+      <p class="form-note">RNNoise starts enabled. Certificate verification uses Mumble’s native trust dialog. Passwords are not saved by Strife.</p>
+      <div class="dialog-footer"><button type="button" class="close-dialog">Cancel</button><button id="submit-connect" type="submit" class="primary">Connect →</button></div>
+    </form>
+  </dialog>
+  <dialog id="video-dialog">
+    <form id="video-form"><div class="dialog-heading"><span class="eyebrow">HELLTUBE CONNECTION</span><button type="button" class="icon-button close-dialog" aria-label="Close">×</button></div><h2>Your watch party.</h2><p class="muted">Use your existing Helltube server and account.</p><label>Server URL<input id="helltube-url" type="url" required placeholder="https://helltube.example.com"></label>
+      <p class="form-note">Local checkout: http://127.0.0.1:3000. Start Helltube first, then sign in inside the video pane. If it cannot connect, check the address and use Reload to try again.</p>
+      <div class="dialog-footer"><button type="button" class="close-dialog">Cancel</button><button type="submit" class="primary">Open Helltube →</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

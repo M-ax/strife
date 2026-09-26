@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Strife.Desktop/Strife.Desktop.csproj" />
+  <Project Path="tests/Strife.Tests/Strife.Tests.csproj" />
+</Solution>
