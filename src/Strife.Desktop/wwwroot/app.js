@@ -1,5 +1,6 @@
 import { organizeChannels, validateVideoUrl } from './model.js';
 import { createWorkspace } from './layout.js';
+import { renderChat } from './chat.js';
 
 const $ = id => document.getElementById(id);
 // Keep the per-launch capability in this history entry so F5 can reattach.
@@ -15,7 +16,7 @@ function request(command, data = {}) {
   if (!native) return Promise.reject(new Error('Open Strife as a desktop app to use Mumble voice controls.'));
   const id = crypto.randomUUID();
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error('The voice engine did not respond.')); }, 35000);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error('The voice engine did not respond.')); }, command === 'importApply' ? 120000 : 35000);
     pending.set(id, { resolve, reject, timer });
     window.external.sendMessage(JSON.stringify({ ...data, command, id, token }));
   });
@@ -49,8 +50,10 @@ function showState(next) {
   $('server-name').textContent = state.connected ? (preferences.mumbleHost || 'Mumble server') : 'Find your people.';
   $('server-description').textContent = state.connected ? 'Connected · native Mumble voice' : 'Connect to any Mumble server.';
   $('connect-button').hidden = state.connected; $('disconnect-button').hidden = !state.connected;
-  $('self-name').textContent = self?.name || 'Not connected';
-  $('self-avatar').textContent = (self?.name || 'S').slice(0, 1).toUpperCase();
+  const name = (state.connected && self?.name) || preferences.username || '';
+  $('self-name').textContent = name || 'Not connected';
+  $('self-name').title = name;
+  $('self-avatar').textContent = (name || 'S').slice(0, 1).toUpperCase();
   $('transmit-status').textContent = !state.connected ? 'Microphone offline' : state.muted ? 'Microphone muted' :
     ['Continuous transmission', 'Voice activity detection', 'Push to talk'][state.transmitMode];
   $('noise-label').textContent = state.rnnoise ? 'RNNoise · enabled' : 'RNNoise · disabled in settings';
@@ -126,24 +129,113 @@ function receive(raw) {
   else if (message.type === 'log') {
     if (workspace.isCollapsed('chat') && lastLog && lastLog !== message.text) $('unread-dot').hidden = false;
     const log = $('chat-log'), nearBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 50;
-    lastLog = message.text; log.textContent = message.text;
+    lastLog = message.text; renderChat(log, message.text, message.links);
     if (nearBottom) log.scrollTop = log.scrollHeight;
   }
 }
 if (native) window.external.receiveMessage(receive);
+$('chat-log').addEventListener('click', openChatLink);
+$('chat-log').addEventListener('auxclick', openChatLink);
+function openChatLink(event) {
+  const anchor = event.target.closest('a');
+  if (!native || !anchor || (event.type === 'auxclick' && event.button !== 1)) return;
+  event.preventDefault();
+  run('openLink', { url: anchor.href }).catch(() => {});
+}
 $('dismiss-notice').onclick = () => $('notice').hidden = true;
 document.querySelectorAll('.close-dialog').forEach(button => button.onclick = () => button.closest('dialog').close());
 document.querySelectorAll('[data-native]').forEach(button => button.onclick = () => { $('menu').open = false; run(button.dataset.native).catch(() => {}); });
-$('connect-button').onclick = () => {
+$('connect-button').onclick = async () => {
   $('host').value = preferences.mumbleHost || ''; $('port').value = preferences.mumblePort || 64738;
   $('username').value = preferences.username || ''; $('password').value = ''; $('connect-dialog').showModal();
+  savedServers = [];
+  $('saved-server').replaceChildren(new Option('Enter server manually', ''));
+  $('saved-server-label').hidden = true;
+  $('password').placeholder = '';
+  try {
+    const result = await run('savedServers');
+    savedServers = result.servers || [];
+    for (const server of savedServers) $('saved-server').append(new Option(`${server.name} — ${server.host}:${server.port}`, String(server.id)));
+    $('saved-server-label').hidden = savedServers.length === 0;
+  } catch {}
 };
+let savedServers = [];
+$('saved-server').onchange = () => {
+  const server = savedServers.find(server => String(server.id) === $('saved-server').value);
+  $('password').value = '';
+  $('password').placeholder = server?.hasPassword ? 'Use imported password' : '';
+  if (server) {
+    $('host').value = server.host; $('port').value = server.port; $('username').value = server.username;
+  }
+};
+for (const id of ['host', 'port', 'username']) $(id).addEventListener('input', () => {
+  $('saved-server').value = ''; $('password').placeholder = '';
+});
 $('connect-form').onsubmit = async event => {
   event.preventDefault(); $('submit-connect').disabled = true;
   try {
-    await run('connect', { host: $('host').value, port: Number($('port').value), username: $('username').value, password: $('password').value });
+    await run('connect', { host: $('host').value, port: Number($('port').value), username: $('username').value, password: $('password').value,
+      ...($('saved-server').value ? { savedServerId: Number($('saved-server').value) } : {}) });
     $('password').value = ''; $('connect-dialog').close();
   } catch {} finally { $('submit-connect').disabled = false; }
+};
+let importPreview = null, importBusy = false;
+function resetImportReview() {
+  importPreview = null;
+  $('import-review').hidden = true; $('apply-import').hidden = true; $('import-sources').hidden = false;
+}
+function setImportBusy(busy) {
+  importBusy = busy;
+  $('import-dialog').querySelectorAll('button').forEach(button => button.disabled = busy);
+  $('import-sources').disabled = busy;
+}
+async function openImport() {
+  $('menu').open = false; $('connect-dialog').close(); resetImportReview();
+  $('import-status').textContent = 'Looking for Mumble…'; $('import-dialog').showModal(); setImportBusy(true);
+  try {
+    const { sources } = await request('importDiscover');
+    for (const [kind, paths] of [['settings', sources.settings], ['database', sources.databases]]) {
+      $(`import-${kind}-options`).replaceChildren(...paths.map(path => new Option(path, path)));
+      $(`import-${kind}-source`).value = kind === 'database' && sources.settings.length ? '' : paths[0] || '';
+    }
+    $('import-status').textContent = sources.settings.length || sources.databases.length
+      ? 'Review the detected paths, then choose Review import.' : 'No Mumble profile found. Paste the paths from your installation or backup.';
+  } catch (error) { $('import-status').textContent = error.message; }
+  finally { setImportBusy(false); }
+}
+$('import-mumble').onclick = openImport;
+$('connect-import').onclick = openImport;
+$('import-dialog').addEventListener('cancel', event => { if (importBusy) event.preventDefault(); });
+$('import-dialog').addEventListener('close', () => {
+  resetImportReview();
+  if (native) request('importCancel').catch(() => {});
+});
+$('change-import').onclick = () => { resetImportReview(); $('import-status').textContent = ''; };
+$('import-form').onsubmit = async event => {
+  event.preventDefault(); if (importBusy) return;
+  setImportBusy(true); $('import-status').textContent = 'Reading Mumble data…';
+  try {
+    const result = await request('importPreview', { settingsSource: $('import-settings-source').value, databaseSource: $('import-database-source').value });
+    importPreview = result.preview;
+    for (const [kind, available] of [['settings', importPreview.hasSettings], ['database', importPreview.hasDatabase], ['identity', importPreview.hasIdentity]]) {
+      $(`import-${kind}`).checked = available; $(`import-${kind}`).disabled = !available;
+    }
+    $('import-summary').textContent = `${importPreview.serverCount} saved server(s)${importPreview.hasSettings ? ' · Settings found' : ''}${importPreview.hasIdentity ? ' · Identity found' : ''}`;
+    $('import-status').textContent = importPreview.databaseSource ? `Database: ${importPreview.databaseSource}` : 'No database selected. Server data will be kept.';
+    $('import-sources').hidden = true; $('import-review').hidden = false; $('apply-import').hidden = false;
+  } catch (error) { $('import-status').textContent = error.message; }
+  finally { setImportBusy(false); }
+};
+$('apply-import').onclick = async () => {
+  if (!importPreview || importBusy) return;
+  setImportBusy(true); $('import-status').textContent = 'Importing and restarting voice…';
+  try {
+    const result = await request('importApply', { previewId: importPreview.id, settings: $('import-settings').checked,
+      database: $('import-database').checked, identity: $('import-identity').checked });
+    $('import-dialog').close();
+    notice(`Mumble import complete. Choose a saved server in Connect to server. Previous data backed up to ${result.backup}`);
+  } catch (error) { $('import-status').textContent = error.message; }
+  finally { setImportBusy(false); }
 };
 $('disconnect-button').onclick = () => run('disconnect').catch(() => {});
 $('mute-button').onclick = () => run('mute').catch(() => {});

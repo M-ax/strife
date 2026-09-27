@@ -9,8 +9,10 @@
 #include "MainWindow.h"
 #include "ServerHandler.h"
 #include "Settings.h"
+#include "JSONSerialization.h"
 #include <QApplication>
 #include <QDialog>
+#include <QDesktopServices>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -18,6 +20,10 @@
 #include <QTimer>
 #include <QUrl>
 #include <QTextDocument>
+#include <QTextBlock>
+#include <QTextFragment>
+#include <QFile>
+#include <QSettings>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #endif
@@ -85,9 +91,51 @@ class StrifeBridge final : public QObject {
         socket.write(QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n');
     }
     void sendLog() {
-        // Qt has already sanitized server HTML. Only plain text crosses into the UI.
-        send({{QStringLiteral("type"), QStringLiteral("log")},
-              {QStringLiteral("text"), Global::get().mw->qteLog->toPlainText().right(120000)}});
+        // Mumble hides empty blocks between message frames with zero line height.
+        // toPlainText() exposes those separators and discards the link targets.
+        QString text;
+        QJsonArray links;
+        bool firstBlock = true;
+        auto *document = Global::get().mw->qteLog->document();
+        for (auto block = document->begin(); block.isValid(); block = block.next()) {
+            const auto format = block.blockFormat();
+            if (block.text().isEmpty() && format.lineHeightType() == QTextBlockFormat::FixedHeight
+                && format.lineHeight() == 0) continue;
+            if (!firstBlock) text += QLatin1Char('\n');
+            firstBlock = false;
+            for (auto it = block.begin(); !it.atEnd(); ++it) {
+                const auto fragment = it.fragment();
+                if (!fragment.isValid()) continue;
+                const auto href = fragment.charFormat().anchorHref();
+                const auto start = text.size();
+                // Match QTextDocument's plain-text whitespace conversion. UTF-16
+                // offsets then address the same characters in JavaScript strings.
+                text += fragment.text().replace(QChar::LineSeparator, QLatin1Char('\n'))
+                    .replace(QChar::ParagraphSeparator, QLatin1Char('\n'))
+                    .replace(QChar::Nbsp, QLatin1Char(' '));
+                if (!href.isEmpty()) {
+                    links.append(QJsonObject{{QStringLiteral("start"), start},
+                        {QStringLiteral("length"), text.size() - start}, {QStringLiteral("href"), href}});
+                }
+            }
+        }
+        const qsizetype removed = qMax(qsizetype(0), text.size() - 120000);
+        QJsonArray retainedLinks;
+        for (const auto &value : links) {
+            auto link = value.toObject();
+            const auto start = link.value(QStringLiteral("start")).toInteger();
+            const auto end = start + link.value(QStringLiteral("length")).toInteger();
+            if (end <= removed) continue;
+            link[QStringLiteral("start")] = qMax(qint64(0), start - removed);
+            link[QStringLiteral("length")] = end - qMax(start, qint64(removed));
+            retainedLinks.append(link);
+        }
+        QJsonObject message{{QStringLiteral("type"), QStringLiteral("log")},
+            {QStringLiteral("text"), text.mid(removed)}, {QStringLiteral("links"), retainedLinks}};
+        // Keep even pathological rich-text logs within the existing IPC bound.
+        if (QJsonDocument(message).toJson(QJsonDocument::Compact).size() >= MaxFrame)
+            message.remove(QStringLiteral("links"));
+        send(message);
     }
     void snapshot() {
         auto &g = Global::get();
@@ -123,12 +171,60 @@ class StrifeBridge final : public QObject {
         auto &g = Global::get();
         const QString op = m.value(QStringLiteral("command")).toString();
         QString error;
-        if (op == QStringLiteral("connect")) {
+        if (op == QStringLiteral("readImportSettings")) {
+            try {
+                const QString source = m.value(QStringLiteral("source")).toString();
+                Settings imported;
+                // Upstream Mumble defaults to Speex. Strife's new-profile default
+                // must not change a setting omitted by Mumble's sparse serializer.
+                imported.noiseCancelMode = Settings::NoiseCancelSpeex;
+                if (source == QStringLiteral("registry")) {
+                    QSettings registry;
+                    if (registry.allKeys().isEmpty()) throw std::runtime_error("No Mumble registry settings found.");
+                    imported.legacyLoad(QStringLiteral(":::::REGISTRY:::::"));
+                } else {
+                    QFile file(source);
+                    if (!file.open(QIODevice::ReadOnly) || file.size() > 512 * 1024)
+                        throw std::runtime_error("Cannot read settings, or the file exceeds 512 KB.");
+                    if (source.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
+                        const auto json = nlohmann::json::parse(file.readAll().toStdString());
+                        if (!json.is_object() || !json.contains("settings_version") || json.at("settings_version") != 1)
+                            throw std::runtime_error("Unsupported Mumble settings version.");
+                        json.get_to(imported);
+                    } else {
+                        QSettings legacy(source, QSettings::IniFormat);
+                        const auto keys = legacy.allKeys();
+                        bool recognized = false;
+                        for (const auto &key : keys)
+                            recognized |= key.startsWith(QStringLiteral("audio/")) || key.startsWith(QStringLiteral("net/"))
+                                || key.startsWith(QStringLiteral("ui/")) || key.startsWith(QStringLiteral("shortcuts/"))
+                                || key == QStringLiteral("databaselocation");
+                        if (!recognized || legacy.status() != QSettings::NoError)
+                            throw std::runtime_error("Not a readable Mumble client settings file.");
+                        imported.legacyLoad(source);
+                    }
+                }
+                const nlohmann::json normalized = imported;
+                const auto settings = QJsonDocument::fromJson(QByteArray::fromStdString(normalized.dump())).object();
+                send({{QStringLiteral("type"), QStringLiteral("result")}, {QStringLiteral("id"), m.value(QStringLiteral("id"))},
+                    {QStringLiteral("ok"), true}, {QStringLiteral("settings"), settings},
+                    {QStringLiteral("hasIdentity"), CertWizard::validateCert(imported.kpCertificate)},
+                    {QStringLiteral("databasePath"), imported.qsDatabaseLocation}});
+            } catch (const std::exception &) {
+                // Parser diagnostics can include certificate bytes or passwords.
+                send({{QStringLiteral("type"), QStringLiteral("result")}, {QStringLiteral("id"), m.value(QStringLiteral("id"))},
+                    {QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Cannot read Mumble settings. Choose a valid version 1 JSON, legacy INI/conf file, or existing Mumble registry settings (maximum 512 KB).")}});
+            }
+            return;
+        } else if (op == QStringLiteral("connect")) {
             const QUrl url(m.value(QStringLiteral("url")).toString());
             if (url.scheme() != QStringLiteral("mumble") || url.host().isEmpty() || url.userName().isEmpty()
                 || url.port(64738) < 1 || url.port(64738) > 65535) error = QStringLiteral("Invalid Mumble server address.");
             else if (g.uiSession || (g.sh && g.sh->isRunning())) error = QStringLiteral("Disconnect before connecting to another server.");
             else g.mw->openUrl(url);
+        } else if (op == QStringLiteral("checkImport")) {
+            if (dialogOpen || QApplication::activeModalWidget()) error = QStringLiteral("Close Mumble's settings and other native dialogs before importing.");
+            else if (g.uiSession || (g.sh && g.sh->isRunning())) error = QStringLiteral("Disconnect from Mumble before importing.");
         } else if (op == QStringLiteral("disconnect")) g.mw->on_qaServerDisconnect_triggered();
         else if (op == QStringLiteral("mute")) g.mw->qaAudioMute->trigger();
         else if (op == QStringLiteral("deafen")) g.mw->qaAudioDeaf->trigger();
@@ -136,6 +232,20 @@ class StrifeBridge final : public QObject {
             const int id = m.value(QStringLiteral("channel")).toInt(-1);
             if (!g.uiSession || id < 0 || !Channel::get(static_cast<unsigned int>(id))) error = QStringLiteral("Channel is no longer available.");
             else g.sh->joinChannel(g.uiSession, static_cast<unsigned int>(id));
+        } else if (op == QStringLiteral("openLink")) {
+            const auto target = m.value(QStringLiteral("url")).toString();
+            const QUrl url(target, QUrl::StrictMode);
+            // Match Log::allowedSchemes() (protected upstream), excluding native
+            // client/channel references. Keep wwwroot/chat.js in sync.
+            static const QStringList schemes = {QStringLiteral("mumble"), QStringLiteral("http"),
+                QStringLiteral("https"), QStringLiteral("gemini"), QStringLiteral("ftp"),
+                QStringLiteral("spotify"), QStringLiteral("steam"), QStringLiteral("irc"),
+                QStringLiteral("gg"), QStringLiteral("mailto"), QStringLiteral("xmpp"),
+                QStringLiteral("skype"), QStringLiteral("rtmp"), QStringLiteral("magnet")};
+            if (target.size() > 8192 || !url.isValid() || url.isRelative()
+                || !schemes.contains(url.scheme()))
+                error = QStringLiteral("This link address is not supported.");
+            else if (!QDesktopServices::openUrl(url)) error = QStringLiteral("Could not open this link.");
         } else if (op == QStringLiteral("chat")) {
             const auto message = m.value(QStringLiteral("text")).toString();
             if (!g.uiSession) error = QStringLiteral("Connect before sending a message.");

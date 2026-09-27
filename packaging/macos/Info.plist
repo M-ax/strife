@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>io.github.m-ax.strife</string>
+  <key>CFBundleName</key><string>Strife</string>
+  <key>CFBundleDisplayName</key><string>Strife</string>
+  <key>CFBundleExecutable</key><string>Strife</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>strife.icns</string>
+  <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+  <key>CFBundleVersion</key><string>@VERSION@</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Strife uses your microphone for voice chat.</string>
+  <key>NSCameraUsageDescription</key><string>Strife uses your camera when you share video in Helltube.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key><true/>
+    <key>NSAllowsArbitraryLoadsInWebContent</key><true/>
+  </dict>
+</dict>
+</plist>

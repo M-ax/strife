@@ -14,6 +14,7 @@
         <button data-native="settings">Voice settings &amp; shortcuts <small>Devices, RNNoise, PTT, output, network</small></button>
         <button data-native="wizard">Audio setup wizard</button>
         <button data-native="certificate">Certificate &amp; identity</button>
+        <button id="import-mumble">Import from Mumble <small>Settings, servers, shortcuts &amp; identity</small></button>
         <hr><button id="video-settings-menu">Helltube server</button><button id="retry-engine">Retry voice engine</button><hr><button id="reset-layout">Reset panel layout</button><hr><button id="quit">Quit Strife</button>
       </nav></details>
     </div>
@@ -62,10 +63,33 @@
   </main>
   <dialog id="connect-dialog">
     <form id="connect-form"><div class="dialog-heading"><span class="eyebrow">MUMBLE CONNECTION</span><button type="button" class="icon-button close-dialog" aria-label="Close">×</button></div><h2>Join the conversation.</h2><p class="muted">Connect to an existing Mumble / Murmur server.</p>
+      <label id="saved-server-label" hidden>Saved server<select id="saved-server"><option value="">Enter server manually</option></select></label>
+      <button type="button" id="connect-import" class="text-button">Import servers from Mumble…</button>
       <div class="form-row"><label class="grow">Server address<input id="host" placeholder="voice.example.com" required maxlength="253" autocomplete="off"></label><label class="port-field">Port<input id="port" type="number" min="1" max="65535" value="64738" required></label></div>
       <label>Username<input id="username" required maxlength="128" autocomplete="username"></label><label>Server password (optional)<input id="password" type="password" maxlength="1024" autocomplete="off"></label>
-      <p class="form-note">RNNoise starts enabled. Certificate verification uses Mumble’s native trust dialog. Passwords are not saved by Strife.</p>
+      <p class="form-note">Certificate verification uses Mumble’s native trust dialog. Typed passwords are not saved. Imported servers can use passwords already saved in Mumble.</p>
       <div class="dialog-footer"><button type="button" class="close-dialog">Cancel</button><button id="submit-connect" type="submit" class="primary">Connect →</button></div>
+    </form>
+  </dialog>
+  <dialog id="import-dialog" aria-labelledby="import-title">
+    <form id="import-form"><div class="dialog-heading"><span class="eyebrow">BRING YOUR MUMBLE PROFILE</span><button type="button" class="icon-button close-dialog" aria-label="Close">×</button></div><h2 id="import-title">Import from Mumble.</h2>
+      <p class="muted">Close Mumble to include its latest settings, and disconnect Strife before importing. Your Mumble installation stays unchanged.</p>
+      <fieldset id="import-sources">
+        <label>Settings file or Windows registry<input id="import-settings-source" list="import-settings-options" placeholder="Path to mumble_settings.json, Mumble.ini, or registry" autocomplete="off"></label><datalist id="import-settings-options"></datalist>
+        <label>Mumble database<input id="import-database-source" list="import-database-options" placeholder="Path to mumble.sqlite (optional)" autocomplete="off"></label><datalist id="import-database-options"></datalist>
+        <p class="form-note">Detected locations appear in the suggestions. You can paste another installation’s file paths. A database beside the settings or referenced by them is found automatically. Choose which categories to import after reviewing.</p>
+        <button id="review-import" type="submit">Review import</button>
+      </fieldset>
+      <div id="import-review" hidden>
+        <p id="import-summary"></p>
+        <label class="check-label"><input id="import-settings" type="checkbox"> Audio settings, shortcuts &amp; preferences</label>
+        <label class="check-label"><input id="import-database" type="checkbox"> Saved servers, passwords, trust, friends &amp; access tokens</label>
+        <label class="check-label"><input id="import-identity" type="checkbox"> Certificate &amp; identity (keeps your server registrations)</label>
+        <p class="form-note">Selected categories replace their existing Strife data. Strife saves a backup first and restarts voice. Helltube and your panel layout are kept.</p>
+        <button id="change-import" type="button" class="text-button">Change source files</button>
+      </div>
+      <p id="import-status" role="status" aria-live="polite"></p>
+      <div class="dialog-footer"><button type="button" class="close-dialog">Cancel</button><button id="apply-import" type="button" class="primary" hidden>Import &amp; restart voice</button></div>
     </form>
   </dialog>
   <dialog id="video-dialog">

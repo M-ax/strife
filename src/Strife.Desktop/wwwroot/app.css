@@ -10,12 +10,14 @@ dialog{border:1px solid #47414f;border-radius:14px;background:#222129;color:#e5e
 .appbar{z-index:60}
 .dock-panel{position:absolute;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;border:1px solid #30313b}
 .voice-pane{padding:0;background:#191a20}
-.dock-panel .panel-header{height:40px;min-height:40px;display:flex;align-items:center;padding:0 5px;gap:3px;background:#1b1c23;border-bottom:1px solid #30313b;flex-shrink:0}
+.dock-panel .panel-header{--panel-controls-opacity:var(--panel-controls-proximity,0);height:40px;min-height:40px;display:flex;align-items:center;padding:0 5px;gap:3px;background:#1b1c23;border-bottom:1px solid #30313b;flex-shrink:0}
+.dock-panel .panel-header:hover,.dock-panel .panel-header:has(:focus-visible),.dock-panel .panel-header:has(.panel-position[aria-expanded=true]){--panel-controls-opacity:1}
 .panel-handle{min-width:0;flex:1;display:flex;align-items:center;gap:7px;border:0;border-radius:3px;background:transparent;padding:8px 3px;text-align:left;font-weight:600;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:grab;touch-action:none}
-.panel-handle::before{content:"⠿";color:#818493;font-size:17px;font-weight:400}
+.panel-handle::before{content:"⠿";color:#818493;font-size:17px;font-weight:400;opacity:var(--panel-controls-opacity);transition:opacity .16s}
 .panel-handle:hover{background:#ffffff08}.panel-handle:active{cursor:grabbing}
 .panel-tools{display:flex;align-items:center;gap:2px;flex-shrink:0}
-.panel-tools>button{width:26px;height:28px;line-height:1;padding:2px;background:transparent;border:0;font-size:18px;border-radius:4px}
+.panel-tools>button{width:26px;height:28px;line-height:1;padding:2px;background:transparent;border:0;font-size:18px;border-radius:4px;opacity:var(--panel-controls-opacity);transition:opacity .16s,background .12s}
+.panel-header:hover .panel-handle::before{transition:none}.panel-header:hover .panel-tools>button{transition:background .12s}
 .panel-tools>button:hover{background:#373541}.panel-tools .dot{margin:0 3px}
 .panel-body{flex:1;min-height:0;min-width:0}
 .rooms-content{display:flex;flex-direction:column;overflow:auto;padding:18px 16px 8px}
@@ -26,6 +28,7 @@ dialog{border:1px solid #47414f;border-radius:14px;background:#222129;color:#e5e
 .controls-pane{background:#17181d}
 .identity>div{min-width:0}.identity strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chat-content{overflow:hidden}.chat-intro{flex-shrink:0}#chat-log{min-height:30px}#chat-form{flex-shrink:0}
+#chat-log a{color:#c7b5ff;text-decoration:underline;text-underline-offset:2px}#chat-log a:hover{color:#e0d5ff}#chat-log a:focus-visible{outline:2px solid #b4a4ff;outline-offset:2px}
 .is-compact .chat-intro{padding-top:9px}.is-compact .chat-intro .eyebrow,.is-compact .chat-intro p{display:none}
 .is-compact .chat-intro h2{margin:0 0 6px;font-size:14px}
 .is-compact .rooms-content{padding-top:10px}.is-compact .rooms-content .voice-empty{display:none}
@@ -34,12 +37,16 @@ dialog{border:1px solid #47414f;border-radius:14px;background:#222129;color:#e5e
 .is-collapsed .panel-header{border-bottom:0}.is-collapsed .video-actions{display:none}
 .is-rail .panel-header{height:100%;flex-direction:column;padding:4px 0}
 .is-rail .panel-handle{writing-mode:vertical-rl;flex:1;padding:6px 8px;gap:9px}
-.is-rail .panel-tools{flex-direction:column}
+.is-rail .panel-tools{flex-direction:column-reverse;order:-1}
 .is-floating{border-color:#626071;border-radius:8px;box-shadow:0 12px 35px #0009}
 .is-floating:focus-within{border-color:#b4a4ff}
-.panel-resize{position:absolute;bottom:0;right:0;width:17px;height:17px;padding:0;border:0;border-radius:0;background:linear-gradient(135deg,transparent 45%,#777385 46%,#777385 53%,transparent 54%,transparent 65%,#777385 66%,#777385 73%,transparent 74%);cursor:nwse-resize;touch-action:none}
-.layout-divider{position:absolute;z-index:3;background:#101115;touch-action:none}
-.layout-divider[data-axis=x]{cursor:col-resize}.layout-divider[data-axis=y]{cursor:row-resize}
+.panel-resize{position:absolute;bottom:0;right:0;width:17px;height:17px;padding:0;border:0;border-radius:0;background:linear-gradient(135deg,transparent 45%,#777385 46%,#777385 53%,transparent 54%,transparent 65%,#777385 66%,#777385 73%,transparent 74%);cursor:nwse-resize;touch-action:none;opacity:0;transition:opacity .16s}
+.panel-resize::before{content:"";position:absolute;inset:-6px 0 0 -6px}
+.panel-resize:hover,.panel-resize:focus-visible{opacity:1}
+@media(hover:none){.panel-tools>button,.panel-handle::before,.panel-resize{opacity:1}}
+/* Divider hit areas overlap adjoining panels without taking layout space. */
+.layout-divider{position:absolute;z-index:3;background:transparent;touch-action:none;transition:background .16s}
+.layout-divider[data-axis=x]{min-width:6px;transform:translateX(-50%);cursor:col-resize}.layout-divider[data-axis=y]{min-height:6px;transform:translateY(-50%);cursor:row-resize}
 .layout-divider:hover,.layout-divider:focus-visible{background:#ac98f3;outline:none}
 .layout-interacting{user-select:none;cursor:grabbing}.layout-interacting iframe{pointer-events:none}
 .dock-preview{position:absolute;z-index:30;pointer-events:none;border:2px solid #baa5ff;border-radius:6px;background:#ac98f32b;display:grid;place-items:center;color:#f3edff;text-shadow:0 1px 3px #000;font-weight:600;text-align:center;padding:12px}
@@ -54,3 +61,7 @@ dialog{border:1px solid #47414f;border-radius:14px;background:#222129;color:#e5e
 .panel-menu strong{display:block;padding:8px;font-size:11px;color:#bdb1d1}.panel-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;font-size:12px;padding:7px 9px}
 .panel-menu button:hover,.panel-menu button:focus-visible{background:#3b3549}
 .workspace-empty{position:absolute;inset:0;display:grid;place-items:center;color:#858896}
+select{width:100%;padding:10px;border:1px solid #48444f;border-radius:6px;background:#17181d;color:inherit;font:inherit}
+#import-dialog{max-height:90vh;overflow:auto}#import-sources{border:0;padding:0;margin:0}
+.check-label{display:flex;flex-direction:row;align-items:center;gap:10px}.check-label input{width:auto;margin:0}
+#import-status{font-size:12px;overflow-wrap:anywhere}#connect-import{margin-bottom:12px}

@@ -8,10 +8,10 @@ test('chat and user controls can dock on every side of rooms without losing pane
     assert.deepEqual(restoreLayout(next), next);
     assert.deepEqual(initial, defaultLayout(), 'layout operations leave the previous layout intact');
     const rects = measureLayout(next, 1480, 837).panels, room = rects.get('rooms'), panel = rects.get(id);
-    if (side === 'top') assert.ok(panel.y + panel.height < room.y);
-    if (side === 'bottom') assert.ok(panel.y > room.y + room.height);
-    if (side === 'left') assert.ok(panel.x + panel.width < room.x);
-    if (side === 'right') assert.ok(panel.x > room.x + room.width);
+    if (side === 'top') assert.equal(panel.y + panel.height, room.y);
+    if (side === 'bottom') assert.equal(panel.y, room.y + room.height);
+    if (side === 'left') assert.equal(panel.x + panel.width, room.x);
+    if (side === 'right') assert.equal(panel.x, room.x + room.width);
   }
 });
 

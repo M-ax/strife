@@ -19,12 +19,20 @@ Initialize Mumble's submodules before building. The tested source revision is f1
 
 Required vcpkg components include Qt6 base/SVG/tools/translations, Boost, OpenSSL, Protobuf, libsndfile, Opus, CLI11, and spdlog, using x64-windows-static-md. SpeexDSP and RNNoise (including its model) are built from Mumble's bundled sources. The optional local test server also requires SQLite and SOCI's bundled source. The script disables overlay, plugin builds, automatic LAN discovery, Ice, and server D-Bus. Hostname/IP connections and the native audio/network/shortcut implementations are retained.
 
-For a self-contained app, including the .NET runtime and native voice engine:
+For a self-contained app and full Windows installer, install Inno Setup 6.3 or newer, then run:
 
     ./scripts/publish.ps1
     ./artifacts/Strife/Strife.exe
 
-Keep the entire published directory together. This Windows workstation builds for Windows x64; native staging and pipe naming need platform-specific work before packaging Linux or macOS releases.
+The setup executable and portable ZIP are written to `artifacts/release`. Setup includes the .NET runtime, native voice engine, and offline Microsoft WebView2/Visual C++ installers. It creates a Start Menu shortcut, optionally creates a desktop shortcut, supports upgrades, and registers an uninstaller. Profiles survive upgrades and uninstall. Use `-NoPackage` to publish only the portable directory; keep that entire directory together.
+
+## Releases and other platforms
+
+Publishing a GitHub release with a version tag such as `v0.1.0` starts the **Publish** workflow. It builds Windows x64, Linux x64, macOS Intel, and macOS Apple Silicon on native runners. Once every build and packaging check passes, it attaches the Windows installer/portable ZIP, Linux tarball, macOS app ZIPs, and `SHA256SUMS.txt` to that release. **Run workflow** builds a supplied version as downloadable workflow artifacts without creating a release.
+
+On macOS, extract the ZIP and move `Strife.app` to Applications (macOS 14 or newer). The app is ad-hoc signed, not Developer ID signed or notarized. On Linux, extract the tarball and run `Strife/Strife`; the build targets Ubuntu 24.04 x64 and requires GTK 3, WebKitGTK 4.1, and the system audio/X11 libraries. Neither platform requires a separately installed .NET runtime or Mumble.
+
+See [release build instructions](docs/releases.md) for native dependencies, local builds, runtime packages, signing, and validation.
 
 ## Connect
 
@@ -37,9 +45,19 @@ Keep the entire published directory together. This Windows workstation builds fo
 
 RNNoise is compiled in and selected by default in every new Strife profile, before audio starts. Later changes made in the native settings dialog persist. The status beneath the microphone controls reports the engine's actual setting. The audio wizard and certificate settings remain available in the menu. Native dialogs open above Strife; the underlying Mumble main window stays hidden, including after accepting settings.
 
-Chat messages go to the current voice channel. Incoming Mumble text and server notices are rendered as plain text; rich HTML and image attachments are not rendered in the privileged desktop UI.
+Chat messages go to the current voice channel. Incoming Mumble text and server notices preserve message line breaks without the native log's hidden spacer lines. URLs and named links are clickable and open through the system's browser or registered application. Other rich HTML and image attachments are not rendered in the privileged desktop UI.
 
 Helltube permits framing by local desktop origins. Strife uses a separate loopback proxy origin to keep Helltube's login cookies working with remote servers and older deployments. HTTP, WebSockets, uploads and media remain served by Helltube; the proxy limits embedding to Strife's shell and forwards the original upstream Origin for authentication. Cookies are namespaced per upstream server, with HttpOnly and SameSite preserved; HTTPS remains verified on the connection to the upstream server. Browser permissions and WebView2 media capabilities still govern screen capture, DRM, and provider playback. No cross-service account linking or channel-to-room synchronization is assumed.
+
+## Import from Mumble
+
+Choose **Menu → Import from Mumble** (also available in **Connect to server**). Close Mumble first so its latest settings are saved, and disconnect Strife from voice. Strife suggests existing profile locations; you can also paste paths from another installation or backup. Supported settings are Mumble's version 1 JSON, legacy INI/conf files, and the current Windows user's Mumble registry settings (`registry`). The server database is `mumble.sqlite` or `.mumble.sqlite`; a database referenced by or beside the selected settings is detected automatically.
+
+Choose **Review import**, then select settings, server data, and/or certificate identity. Settings include audio devices, processing and global shortcuts. Server data includes saved servers and passwords, certificate trust, friends, access tokens and server-specific shortcuts. Importing your certificate identity preserves server registrations. Selected categories **replace** their Strife equivalents; unselected categories, Helltube and panel layout stay as they are. Device names and external sound-file paths must still exist on this computer.
+
+Strife takes a consistent database snapshot without modifying the source installation, backs up the replaced data under `import-backups` in its profile, and restarts voice. If applying the data or restarting voice fails, it attempts to restore the backup automatically. The completion message shows the backup location. To restore a backup manually, close Strife and copy its files into the Strife profile. Backups contain the same private credentials as the original profile.
+
+Imported servers appear in **Connect to server → Saved server**. Their saved passwords stay in the native profile and are used without displaying them in the web interface. Manually typed passwords are still not saved. Imported settings retain Mumble's chosen noise suppression; RNNoise remains the default for new Strife profiles.
 
 ## Profiles and process lifetime
 
@@ -47,7 +65,7 @@ Settings, identity, server certificate pins, and browser session storage live un
 
 STRIFE_PROFILE overrides the profile directory, and STRIFE_VOICE_ENGINE overrides the native executable path. Do not share a profile between simultaneous running instances.
 
-The desktop owns the voice process through a random, current-user-only named pipe and a per-launch authentication token. Closing the desktop shuts down the voice process; a broken pipe also quits the engine. Audio, Opus, TLS, encrypted UDP, TCP voice tunneling, reconnection, jitter handling, and shortcuts remain upstream Mumble code.
+The desktop owns the voice process through a random, current-user-only named pipe (a private Unix socket on macOS/Linux) and a per-launch authentication token. Closing the desktop shuts down the voice process; a broken pipe also quits the engine. Audio, Opus, TLS, encrypted UDP, TCP voice tunneling, reconnection, jitter handling, and shortcuts remain upstream Mumble code.
 
 ## Validate
 

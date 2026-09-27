@@ -1,5 +1,5 @@
 export const PANEL_IDS = ['rooms', 'chat', 'controls', 'video'];
-export const GAP = 5;
+export const GAP = 0;
 export const BAR = 42;
 const split = (axis, ratio, first, second) => ({ axis, ratio, first, second });
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));

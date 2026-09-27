@@ -4,17 +4,21 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Runtime.InteropServices;
+using System.Collections.Concurrent;
 
 namespace Strife;
 
 public sealed class VoiceEngine(string profileDirectory) : IAsyncDisposable
 {
     private NamedPipeServerStream? pipe;
+    private string? pipeDirectory;
     private Process? process;
     private Task? reader;
     private readonly SemaphoreSlim writerLock = new(1);
     private readonly CancellationTokenSource lifetime = new();
     private readonly SemaphoreSlim startLock = new(1);
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> requests = new();
+    private bool stopping;
     public bool IsReady { get; private set; }
     public nint OwnerWindow { get; set; }
     public event Action<JsonElement>? Message;
@@ -27,11 +31,14 @@ public sealed class VoiceEngine(string profileDirectory) : IAsyncDisposable
     {
         var configured = Environment.GetEnvironmentVariable("STRIFE_VOICE_ENGINE");
         if (!string.IsNullOrWhiteSpace(configured)) return Path.GetFullPath(configured);
-        var packaged = Path.Combine(AppContext.BaseDirectory, "voice", "strife-voice.exe");
+        var relativePath = OperatingSystem.IsMacOS()
+            ? Path.Combine("StrifeVoice.app", "Contents", "MacOS", "Mumble")
+            : OperatingSystem.IsWindows() ? "strife-voice.exe" : "strife-voice";
+        var packaged = Path.Combine(AppContext.BaseDirectory, "voice", relativePath);
         if (File.Exists(packaged)) return packaged;
         for (var current = new DirectoryInfo(AppContext.BaseDirectory); current is not null; current = current.Parent)
         {
-            var candidate = Path.Combine(current.FullName, "artifacts", "voice", "strife-voice.exe");
+            var candidate = Path.Combine(current.FullName, "artifacts", "voice", relativePath);
             if (File.Exists(candidate)) return candidate;
         }
         return packaged;
@@ -43,7 +50,6 @@ public sealed class VoiceEngine(string profileDirectory) : IAsyncDisposable
         try
         {
             if (IsReady) return;
-            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("This build uses the Windows Mumble engine.");
             var executable = FindExecutable();
             if (!File.Exists(executable))
                 throw new FileNotFoundException("Voice engine has not been built. Run scripts/build-voice.ps1, then Retry voice engine.");
@@ -58,6 +64,15 @@ public sealed class VoiceEngine(string profileDirectory) : IAsyncDisposable
             // SQLite file is valid and lets its normal schema initializer run.
             using (File.Open(database, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite)) { }
             var name = "Strife." + Guid.NewGuid().ToString("N");
+            if (!OperatingSystem.IsWindows())
+            {
+                // Qt and .NET must use the same absolute Unix socket path. Keep
+                // it short for macOS's 104-byte limit, regardless of TMPDIR.
+                pipeDirectory = Path.Combine("/tmp", name);
+                Directory.CreateDirectory(pipeDirectory,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                name = Path.Combine(pipeDirectory, "voice");
+            }
             var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
             pipe = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
@@ -82,6 +97,7 @@ public sealed class VoiceEngine(string profileDirectory) : IAsyncDisposable
             Directory.CreateDirectory(temporaryDirectory);
             info.Environment["TEMP"] = temporaryDirectory;
             info.Environment["TMP"] = temporaryDirectory;
+            if (!OperatingSystem.IsWindows()) info.Environment["TMPDIR"] = temporaryDirectory;
             process = Process.Start(info) ?? throw new IOException("Could not start the voice engine.");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
@@ -129,6 +145,13 @@ public sealed class VoiceEngine(string profileDirectory) : IAsyncDisposable
             while (!lifetime.IsCancellationRequested)
             {
                 var message = JsonSerializer.Deserialize<JsonElement>(await ReadFrameAsync(stream, lifetime.Token));
+                if (message.GetProperty("type").GetString() == "result"
+                    && message.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
+                    && id.GetString()!.StartsWith("import-", StringComparison.Ordinal))
+                {
+                    if (requests.TryRemove(id.GetString()!, out var request)) request.TrySetResult(message);
+                    continue; // Even late import responses must stay out of the web view.
+                }
                 switch (message.GetProperty("type").GetString())
                 {
                     case "state": LastState = message; break;
@@ -141,7 +164,8 @@ public sealed class VoiceEngine(string profileDirectory) : IAsyncDisposable
         {
             IsReady = false;
             LastState = null;
-            if (!lifetime.IsCancellationRequested)
+            foreach (var request in requests.Values) request.TrySetException(new IOException("Voice engine disconnected."));
+            if (!lifetime.IsCancellationRequested && !stopping)
             {
                 Failure = "Voice engine stopped. Retry to reconnect.";
                 Stopped?.Invoke(Failure);
@@ -155,6 +179,38 @@ public sealed class VoiceEngine(string profileDirectory) : IAsyncDisposable
         if (OperatingSystem.IsWindows() && process is { HasExited: false })
             AllowSetForegroundWindow(process.Id);
         await WriteAsync(command, lifetime.Token);
+    }
+
+    internal Task<JsonElement> ReadImportSettingsAsync(string source) => ImportRequestAsync("readImportSettings", source);
+    internal Task<JsonElement> EnsureImportReadyAsync() => ImportRequestAsync("checkImport", "");
+
+    private async Task<JsonElement> ImportRequestAsync(string command, string source)
+    {
+        var id = "import-" + Guid.NewGuid().ToString("N");
+        var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        requests[id] = completion;
+        try
+        {
+            await SendAsync(new { command, id, source });
+            var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            if (!result.GetProperty("ok").GetBoolean()) throw new ArgumentException(result.GetProperty("error").GetString());
+            return result;
+        }
+        finally { requests.TryRemove(id, out _); }
+    }
+
+    public async Task StopAsync()
+    {
+        await startLock.WaitAsync(lifetime.Token);
+        stopping = true;
+        try
+        {
+            await StopProcessAsync();
+            if (reader is not null) await reader;
+            LastState = null;
+            LastLog = null;
+        }
+        finally { stopping = false; startLock.Release(); }
     }
 
     private async Task WriteAsync(object command, CancellationToken token)
@@ -179,10 +235,19 @@ public sealed class VoiceEngine(string profileDirectory) : IAsyncDisposable
             catch (Exception e) when (e is IOException or TimeoutException or ObjectDisposedException) { }
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             try { await process.WaitForExitAsync(timeout.Token); }
-            catch (OperationCanceledException) { if (!process.HasExited) process.Kill(true); }
+            catch (OperationCanceledException)
+            {
+                if (!process.HasExited) process.Kill(true);
+                await process.WaitForExitAsync();
+            }
         }
         pipe?.Dispose();
         pipe = null;
+        if (pipeDirectory is not null)
+        {
+            Directory.Delete(pipeDirectory);
+            pipeDirectory = null;
+        }
         process?.Dispose();
         process = null;
     }

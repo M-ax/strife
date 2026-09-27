@@ -5,12 +5,14 @@ using System.Text.Json.Nodes;
 namespace Strife;
 
 public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voice, Uri origin, Action<string> publish,
-    Action? close = null, Func<string, Task<string>>? loadVideo = null)
+    Action? close = null, Func<string, Task<string>>? loadVideo = null) : IDisposable
 {
     public string Token { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private readonly SemaphoreSlim gate = new(1);
+    private readonly MumbleImport importer = new(preferences.DirectoryPath);
+    private PreparedImport? preparedImport;
     private static readonly HashSet<string> VoiceCommands =
-        ["disconnect", "join", "chat", "mute", "deafen", "settings", "wizard", "certificate"];
+        ["disconnect", "join", "chat", "openLink", "mute", "deafen", "settings", "wizard", "certificate"];
 
     public bool IsTrusted(Uri? uri, string? token) =>
         uri is { IsAbsoluteUri: true } && uri.GetLeftPart(UriPartial.Path) == origin.AbsoluteUri && token == Token;
@@ -67,12 +69,59 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
                     videoUrl = loadVideo is null ? preferences.Current.HelltubeUrl : await loadVideo(preferences.Current.HelltubeUrl) });
                 Send(new { type = "result", id, ok = true });
             }
+            else if (command == "importDiscover")
+                Send(new { type = "result", id, ok = true, sources = MumbleImport.Discover() });
+            else if (command == "importPreview")
+            {
+                preparedImport?.Dispose();
+                preparedImport = null;
+                preparedImport = await importer.PrepareAsync(message["settingsSource"]?.GetValue<string>() ?? "",
+                    message["databaseSource"]?.GetValue<string>() ?? "", voice.ReadImportSettingsAsync);
+                Send(new { type = "result", id, ok = true, preview = preparedImport.Summary });
+            }
+            else if (command == "importCancel")
+            {
+                preparedImport?.Dispose();
+                preparedImport = null;
+                Send(new { type = "result", id, ok = true });
+            }
+            else if (command == "importApply")
+            {
+                if (preparedImport is null || message["previewId"]?.GetValue<string>() != preparedImport.Id)
+                    throw new ArgumentException("Review the import again before applying it.");
+                if (voice.IsReady) await voice.EnsureImportReadyAsync();
+                var selection = new ImportSelection(message["settings"]?.GetValue<bool>() ?? false,
+                    message["database"]?.GetValue<bool>() ?? false, message["identity"]?.GetValue<bool>() ?? false);
+                string backup;
+                try
+                {
+                    backup = await importer.ApplyAsync(preparedImport, selection, async () =>
+                    {
+                        await voice.StopAsync();
+                        Send(new { type = "engine", ready = false });
+                    }, voice.StartAsync);
+                }
+                finally { Send(new { type = "engine", ready = voice.IsReady, error = voice.Failure }); }
+                preparedImport.Dispose();
+                preparedImport = null;
+                Send(new { type = "result", id, ok = true, backup });
+            }
+            else if (command == "savedServers")
+                Send(new { type = "result", id, ok = true, servers = importer.GetServers() });
             else if (command == "connect")
             {
                 var host = message["host"]!.GetValue<string>();
                 var port = message["port"]!.GetValue<int>();
                 var username = message["username"]!.GetValue<string>();
-                var url = PreferencesStore.MumbleUrl(host, port, username, message["password"]?.GetValue<string>() ?? "");
+                var password = message["password"]?.GetValue<string>() ?? "";
+                if (message["savedServerId"] is { } savedId)
+                {
+                    var saved = importer.GetServer(savedId.GetValue<long>());
+                    if (host != saved.Server.Host || port != saved.Server.Port || username != saved.Server.Username)
+                        throw new ArgumentException("Select the saved server again or use a manual connection.");
+                    if (password.Length == 0) password = saved.Password;
+                }
+                var url = PreferencesStore.MumbleUrl(host, port, username, password);
                 preferences.Save(preferences.Current with { MumbleHost = host.Trim(), MumblePort = port, Username = username.Trim() });
                 Send(new { type = "preferences", value = preferences.Current });
                 if (!voice.IsReady) throw new InvalidOperationException("Voice engine is not ready.");
@@ -86,10 +135,13 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
             else throw new ArgumentException("Unknown Strife command.");
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or IOException or System.ComponentModel.Win32Exception
-            or OperationCanceledException or JsonException or NullReferenceException or PlatformNotSupportedException)
+            or OperationCanceledException or JsonException or NullReferenceException or PlatformNotSupportedException
+            or Microsoft.Data.Sqlite.SqliteException or UnauthorizedAccessException or TimeoutException)
         {
             Send(new { type = "result", id, ok = false, error = e is OperationCanceledException ? "Voice engine startup timed out." : e.Message });
         }
         finally { gate.Release(); }
     }
+
+    public void Dispose() => preparedImport?.Dispose();
 }

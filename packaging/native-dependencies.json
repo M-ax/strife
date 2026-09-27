@@ -1,0 +1,22 @@
+{
+  "mumbleRevision": "f1954599ec510a4eb894106f79631f7ff8f1b6a1",
+  "environmentRelease": "2026-02",
+  "environments": {
+    "win-x64": {
+      "archive": "mumble_env.x64-windows-static-md.b1fe4a4257.7z",
+      "sha256": "1bad50d8a5b6c31ac6665dc25f68ca234a4fd913b9db6e33dfe4dde4c8abc6ac"
+    },
+    "linux-x64": {
+      "archive": "mumble_env.x64-linux.b1fe4a4257.tar.xz",
+      "sha256": "7c8b51c645a180b55932654600e18c0dcae6199f0d89e2e3f4fb112718580f54"
+    },
+    "osx-x64": {
+      "archive": "mumble_env.x64-osx.b1fe4a4257.tar.xz",
+      "sha256": "c834ad2ff25c8055a902e515511f215b69ce749df626bd42bc69e048e975baea"
+    },
+    "osx-arm64": {
+      "archive": "mumble_env.arm64-osx.b1fe4a4257.tar.xz",
+      "sha256": "023fd03b0ff4788c4a38694af2ec8a54a20491a19ba095fa5761f2d5ef8ab90b"
+    }
+  }
+}

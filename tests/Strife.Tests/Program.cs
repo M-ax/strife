@@ -15,6 +15,12 @@ void Reject(Action action, string name)
     try { action(); } catch (ArgumentException) { Check(true, name); return; }
     throw new Exception("FAIL: " + name);
 }
+if (args.Contains("--voice-startup-only"))
+{
+    await VoiceStartup.Run(Check);
+    Console.WriteLine($"{count} checks passed.");
+    return;
+}
 foreach (var value in new[] { "file:///C:/Windows", "javascript:alert(1)", "https://user:pass@example.com", "//example.com" })
     Reject(() => PreferencesStore.ValidateHelltubeUrl(value), "reject unsafe Helltube address " + value.Split(':')[0]);
 Check(PreferencesStore.ValidateHelltubeUrl("http://127.0.0.1:3000/path").Port == 3000, "local Helltube URL");
@@ -85,6 +91,7 @@ using (var stream = new MemoryStream(new byte[1024 * 1024 + 1]))
     try { await VoiceEngine.ReadFrameAsync(stream, default); throw new Exception("Oversized frame accepted"); }
     catch (IOException) { Check(true, "oversized IPC frame rejected"); }
 }
+await ImportTests.Run(directory, Check);
 await ProxySmoke.Run(Check);
 if (args.Contains("--native")) await NativeSmoke.Run(Check);
 Console.WriteLine($"{count} checks passed.");

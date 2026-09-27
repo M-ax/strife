@@ -38,7 +38,7 @@ internal static class NativeSmoke
             logfile={Q("server.log")}
             sslCert={Q("server.pem")}
             sslKey={Q("server.key")}
-            welcometext=Strife integration test
+            welcometext="Strife integration test 😀 <a href=\"https://example.com/docs?a=1&amp;b=2\">Named guide</a><br/>Second line<br/><br/>After blank line"
             registerName=Strife local test
             """);
         var start = new ProcessStartInfo(serverPath) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = directory };
@@ -68,7 +68,8 @@ internal static class NativeSmoke
                 command.ExecuteNonQuery();
                 return profile;
             }
-            await using var alice = new VoiceEngine(await Profile("alice"));
+            var aliceProfile = await Profile("alice");
+            await using var alice = new VoiceEngine(aliceProfile);
             await using var bob = new VoiceEngine(await Profile("bob"));
             var aliceMessages = new ConcurrentQueue<JsonElement>();
             var bobMessages = new ConcurrentQueue<JsonElement>();
@@ -77,16 +78,40 @@ internal static class NativeSmoke
             await Until(() => Task.FromResult(alice.LastState is not null && bob.LastState is not null), "initial snapshots");
             check(alice.LastState!.Value.GetProperty("rnnoise").GetBoolean(), "native RNNoise enabled by default");
             check(alice.LastState.Value.GetProperty("transmitMode").GetInt32() == 2, "native PTT settings loaded");
+            await ImportTests.Native(directory, aliceProfile, alice, check);
             await alice.SendAsync(new { command = "connect", id = "connect-a", url = PreferencesStore.MumbleUrl("127.0.0.1", port, "StrifeAlice", "") });
             await bob.SendAsync(new { command = "connect", id = "connect-b", url = PreferencesStore.MumbleUrl("127.0.0.1", port, "StrifeBob", "") });
             await Until(() => Task.FromResult(alice.LastState?.GetProperty("users").GetArrayLength() == 2 &&
                 bob.LastState?.GetProperty("users").GetArrayLength() == 2), "two-client vanilla Murmur connection");
             check(alice.LastState!.Value.GetProperty("connected").GetBoolean(), "TLS connection to vanilla Murmur");
+            try { await alice.EnsureImportReadyAsync(); throw new Exception("Import allowed during a connection"); }
+            catch (ArgumentException) { check(true, "native import is rejected while connected"); }
+            check(!aliceMessages.Any(m => m.GetProperty("type").GetString() == "result"
+                && m.GetProperty("id").GetString()!.StartsWith("import-")), "private import responses never reach UI subscribers");
             check(alice.LastState.Value.GetProperty("channels").GetArrayLength() >= 1, "live server channel tree");
             await alice.SendAsync(new { command = "chat", id = "chat", text = "Strife smoke <script> is plain text" });
             await Until(() => Task.FromResult(bobMessages.Any(m => m.GetProperty("type").GetString() == "log" &&
                 m.GetProperty("text").GetString()!.Contains("Strife smoke <script> is plain text"))), "cross-client chat");
             check(true, "channel chat received by second native client");
+            var log = bob.LastLog!.Value;
+            var logText = log.GetProperty("text").GetString()!;
+            check(!logText.StartsWith('\n') && !logText.EndsWith('\n') &&
+                !logText.Contains("\n\n["), "native frame separators do not add blank lines to chat");
+            check(logText.Contains("Named guide\nSecond line\n\nAfter blank line"),
+                "intentional message line breaks and blank lines survive log export");
+            check(log.GetProperty("links").EnumerateArray().Any(link =>
+                link.GetProperty("href").GetString() == "https://example.com/docs?a=1&b=2" &&
+                logText.Substring(link.GetProperty("start").GetInt32(), link.GetProperty("length").GetInt32()) == "Named guide"),
+                "native named links preserve their targets and UTF-16 text offsets");
+            foreach (var target in new[] { "javascript:alert(1)", "file:///C:/Windows", "data:text/html,test",
+                "qrc:/test", "clientid://id.1/test", "channelid://id.1/test", "//example.com", "relative" })
+            {
+                var linkId = "link-" + Guid.NewGuid().ToString("N");
+                await alice.SendAsync(new { command = "openLink", id = linkId, url = target });
+                await Until(() => Task.FromResult(aliceMessages.Any(m => m.GetProperty("type").GetString() == "result" &&
+                    m.GetProperty("id").GetString() == linkId && !m.GetProperty("ok").GetBoolean())), "unsafe link rejection");
+            }
+            check(true, "native link handler rejects active, local, internal and relative URLs");
             await alice.SendAsync(new { command = "mute", id = "mute" });
             await Until(() => Task.FromResult(alice.LastState?.GetProperty("muted").GetBoolean() == true), "mute state");
             check(true, "native mute state reflected in UI bridge");
