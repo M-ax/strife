@@ -26,6 +26,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - runtime: osx-arm64
+            os: macos-15
           - runtime: osx-x64
             os: macos-15-intel
     runs-on: ${{ matrix.os }}

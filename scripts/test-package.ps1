@@ -18,7 +18,10 @@ try {
         if ($LASTEXITCODE) { throw 'Extracted app signature is invalid.' }
         $env:STRIFE_VOICE_ENGINE = Join-Path $app 'Contents/MacOS/voice/StrifeVoice.app/Contents/MacOS/Mumble'
         foreach ($binary in @($env:STRIFE_VOICE_ENGINE, (Join-Path $app 'Contents/MacOS/PhotinoX.Native.dylib'))) {
-            $dependencies = @(& otool -L $binary) | Select-Object -Skip 1
+            # Universal dylibs have a filename header for each architecture.
+            # Only indented lines describe dependencies; headers contain the
+            # staging path and must not be mistaken for a linked build path.
+            $dependencies = @(& otool -L $binary) | Where-Object { $_ -match '^\s+' }
             if ($LASTEXITCODE) { throw 'Cannot inspect macOS dependencies.' }
             if ($dependencies -match '/opt/homebrew/|/usr/local/|/Users/runner/|/artifacts/') { throw "Nonportable macOS dependency: $dependencies" }
         }
