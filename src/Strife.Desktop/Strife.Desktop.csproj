@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyName>Strife</AssemblyName>
+    <ApplicationIcon>wwwroot/assets/strife.ico</ApplicationIcon>
     <RootNamespace>Strife</RootNamespace>
   </PropertyGroup>
   <ItemGroup>

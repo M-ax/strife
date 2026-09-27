@@ -52,6 +52,26 @@ await using (var voice = new VoiceEngine(directory))
         r.GetProperty("value").GetProperty("username").GetString() == "SavedUser"), "saved connection form is synchronized to the UI");
     Check(!File.ReadAllText(Path.Combine(directory, "preferences.json")).Contains("do-not-save"), "connection password is never persisted");
     replies.Clear();
+    var layout = JsonSerializer.Deserialize<JsonElement>("""
+        {"version":1,"root":{"axis":"y","ratio":0.5,"first":"rooms","second":"controls"},"floating":[{"id":"chat","x":200,"y":100,"width":300,"height":400},{"id":"video","x":600,"y":100,"width":500,"height":400}],"collapsed":{"chat":true}}
+        """);
+    await bridge.ReceiveAsync(origin, JsonSerializer.Serialize(new { token = bridge.Token, command = "preferences", id = "layout",
+        workspaceLayout = layout, chatCollapsed = true }));
+    var layoutSaved = new PreferencesStore(directory); layoutSaved.Load();
+    Check(layoutSaved.Current.WorkspaceLayout is { } storedLayout && JsonElement.DeepEquals(storedLayout, layout),
+        "docking, floating bounds and collapse state persist across desktop launches");
+    await bridge.ReceiveAsync(origin, JsonSerializer.Serialize(new { token = bridge.Token, command = "preferences", id = "other",
+        helltubeUrl = "https://video.example.com/room" }));
+    Check(preferences.Current.WorkspaceLayout is { } keptLayout && JsonElement.DeepEquals(keptLayout, layout),
+        "other preference changes preserve the workspace");
+    foreach (var invalid in new object[] { "not an object", new { oversized = new string('x', 9000) } })
+    {
+        replies.Clear();
+        await bridge.ReceiveAsync(origin, JsonSerializer.Serialize(new { token = bridge.Token, command = "preferences", id = "invalid",
+            workspaceLayout = invalid }));
+        Check(replies.Single().GetProperty("ok").GetBoolean() == false, "invalid or oversized layout is rejected");
+    }
+    replies.Clear();
     await bridge.ReceiveAsync(origin, Message(bridge.Token, "arbitrary-executable"));
     Check(replies.Single().GetProperty("ok").GetBoolean() == false, "command allowlist rejects unknown operation");
 }

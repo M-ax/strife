@@ -1,6 +1,8 @@
 # Strife
 
-A PhotinoX desktop app combining native Mumble voice with an existing Helltube server. The left pane contains the live Mumble channel tree, the middle pane contains collapsible Mumble chat, and the remaining space hosts Helltube's existing interface.
+A PhotinoX desktop app combining native Mumble voice with an existing Helltube server. By default, Mumble rooms and user controls sit on the left, chat sits beside them, and Helltube fills the remaining space. Drag any panel title to a highlighted workspace or panel edge to dock it top, bottom, left, or right. Drop elsewhere to float it. Chat and user controls can be placed above or below the rooms list.
+
+Each title bar has collapse and position controls. The position menu also offers **Above Mumble rooms** and **Below Mumble rooms**. Drag dividers to resize docked panels, or the lower-right corner to resize a floating panel; focused resize controls also accept arrow keys. Press **Esc** to cancel a drag. Use **Menu → Reset panel layout** to restore the defaults. Moving panels preserves chat drafts and the embedded Helltube session.
 
 ## Run on Windows x64
 
@@ -41,7 +43,7 @@ Helltube permits framing by local desktop origins. Strife uses a separate loopba
 
 ## Profiles and process lifetime
 
-Settings, identity, server certificate pins, and browser session storage live under %LOCALAPPDATA%\Strife. Strife stores the last server address/port/username, Helltube URL, and chat collapse preference. F5 restores those settings and the running Mumble session without reconnecting voice; Helltube reloads into its saved login and selected room. The connection form's password is passed to the voice engine in memory and is not written into Strife's preferences.
+Settings, identity, server certificate pins, and browser session storage live under %LOCALAPPDATA%\Strife. Strife stores the last server address/port/username, Helltube URL, and panel layout (docking, floating positions, sizes, and collapse state). F5 restores those settings and the running Mumble session without reconnecting voice; Helltube reloads into its saved login and selected room. The connection form's password is passed to the voice engine in memory and is not written into Strife's preferences.
 
 STRIFE_PROFILE overrides the profile directory, and STRIFE_VOICE_ENGINE overrides the native executable path. Do not share a profile between simultaneous running instances.
 
@@ -63,3 +65,7 @@ The browser test uses installed Chrome by default; set STRIFE_TEST_BROWSER=msedg
 Native integration tests run two real voice engines against an isolated, unmodified Murmur server over TLS, pinning only a generated test certificate in test profiles. Test profiles select PTT without a binding so automated checks do not broadcast microphone audio. They exercise user/channel synchronization, cross-client text, mute/deafen, invalid channel handling, disconnect, and shutdown. Proxy tests cover Origin enforcement, cookie isolation, authenticated WebSockets, uploads, and ranged direct media. The verified Windows capture log reports WASAPI input and RNNoise 0.2 active. Acoustic quality and a physical global PTT binding should also be checked using your chosen microphone/headset.
 
 See [architecture](docs/architecture.md) for integration details and [third-party notices](THIRD-PARTY-NOTICES.md) for upstream licenses.
+
+## Branding
+
+The orange logo and favicon in `src/Strife.Desktop/wwwroot/assets` match the Strife website. The header uses `mark.svg`; `favicon.svg` is also the source for the Windows executable and window icon. After editing the favicon, run `npm run icons` to regenerate the multi-resolution `strife.ico` using the existing Playwright dependency and installed Chrome (`STRIFE_TEST_BROWSER=msedge` selects Edge). Rebuild or publish the app to apply the desktop icon.

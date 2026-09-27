@@ -3,23 +3,27 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark"><title>Strife</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="app.css"><script type="module" src="app.js"></script>
 </head>
 <body>
   <header class="appbar">
-    <div class="brand"><span class="brand-mark">S</span> STRIFE <span class="tagline">VOICE + VIDEO</span></div>
+    <div class="brand"><img class="brand-mark" src="assets/mark.svg" width="32" height="32" alt=""> STRIFE <span class="tagline">VOICE + VIDEO</span></div>
     <div class="appbar-right"><span id="engine-label" class="muted">Starting voice engine…</span>
       <details id="menu" class="menu"><summary>☰ Menu</summary><nav aria-label="Application menu">
         <button data-native="settings">Voice settings &amp; shortcuts <small>Devices, RNNoise, PTT, output, network</small></button>
         <button data-native="wizard">Audio setup wizard</button>
         <button data-native="certificate">Certificate &amp; identity</button>
-        <hr><button id="video-settings-menu">Helltube server</button><button id="retry-engine">Retry voice engine</button><hr><button id="quit">Quit Strife</button>
+        <hr><button id="video-settings-menu">Helltube server</button><button id="retry-engine">Retry voice engine</button><hr><button id="reset-layout">Reset panel layout</button><hr><button id="quit">Quit Strife</button>
       </nav></details>
     </div>
   </header>
   <div id="notice" class="notice" role="alert" hidden><span id="notice-text"></span><button id="dismiss-notice" aria-label="Dismiss notification">×</button></div>
+  <p id="layout-help" class="sr-only">Drag a panel title to dock at a workspace or panel edge, or drop in open space to float. Use the position menu to dock with the keyboard. Press Escape to cancel a drag.</p>
   <main id="workspace">
-    <aside class="voice-pane" aria-label="Voice channels">
+    <aside id="rooms-pane" class="voice-pane dock-panel" data-panel="rooms" aria-label="Voice channels">
+      <header class="panel-header"></header>
+      <div id="rooms-content" class="rooms-content panel-body">
       <div class="section-heading"><span class="eyebrow">YOUR SERVER</span><span id="connection-dot" class="dot"></span></div>
       <h1 id="server-name">Find your people.</h1><p id="server-description" class="muted">Connect to any Mumble server.</p>
       <button id="connect-button" class="primary">＋ Connect to server</button><button id="disconnect-button" hidden>Disconnect</button>
@@ -27,28 +31,33 @@
       <div class="section-heading"><span class="eyebrow">VOICE CHANNELS</span><span id="user-count" class="muted">0 online</span></div>
       <div id="channel-tree" class="channel-tree" role="tree" aria-label="Server channel tree"></div>
       <div id="voice-empty" class="voice-empty"><span>◌</span><strong>A place to hang out</strong><p>Your channels and friends will appear here once you connect.</p></div>
-      <footer class="voice-footer">
+      </div>
+    </aside>
+    <section id="controls-pane" class="controls-pane dock-panel" data-panel="controls" aria-label="User controls">
+      <header class="panel-header"></header>
+      <div id="controls-content" class="voice-footer panel-body">
         <div class="identity"><span class="avatar" id="self-avatar">S</span><div><strong id="self-name">Not connected</strong><small id="transmit-status">Microphone offline</small></div></div>
         <div class="voice-controls"><button id="mute-button" aria-pressed="false" disabled>♩ <span>Mute</span></button><button id="deafen-button" aria-pressed="false" disabled>◖◗ <span>Deafen</span></button><button data-native="settings" aria-label="Voice settings">⚙</button></div>
         <div class="noise-status"><span id="noise-dot" class="dot"></span><span id="noise-label">Waiting for voice engine</span></div>
         <button id="ptt-hint" class="text-button" data-native="settings">Set a global PTT bind in Shortcuts ↗</button>
-      </footer>
-    </aside>
-    <section id="chat-pane" class="chat-pane" aria-label="Mumble chat">
-      <header class="pane-header"><strong><span class="accent">#</span> Voice chat</strong><button id="collapse-chat" class="icon-button" aria-label="Collapse chat" aria-expanded="true">‹</button></header>
-      <div class="chat-content">
+      </div>
+    </section>
+    <section id="chat-pane" class="chat-pane dock-panel" data-panel="chat" aria-label="Mumble chat">
+      <header class="panel-header"></header>
+      <div id="chat-content" class="chat-content panel-body">
         <div class="chat-intro"><span class="eyebrow">THE CONVERSATION</span><h2 id="chat-channel">Say hello.</h2><p class="muted">Messages from your Mumble server.</p></div>
         <div id="chat-log" role="log" aria-live="polite" aria-label="Mumble messages"></div>
         <form id="chat-form"><label class="sr-only" for="chat-message">Message your current voice channel</label><textarea id="chat-message" rows="2" maxlength="5000" placeholder="Message your voice channel…" disabled></textarea><div class="composer-bottom"><small id="chat-target">Connect to start chatting</small><button id="send-chat" class="icon-button" type="submit" aria-label="Send message" disabled>↑</button></div></form>
       </div>
-      <button id="expand-chat" class="expand-chat" aria-label="Expand chat" aria-expanded="false" hidden><span>›</span><span class="vertical-label">CHAT</span><span id="unread-dot" class="dot live" hidden></span></button>
     </section>
-    <section class="video-pane" aria-label="Helltube video sharing">
-      <header class="pane-header"><div class="video-title"><span class="video-mark">▶</span><strong>Helltube</strong><span class="muted">Watch together.</span></div><div class="video-actions"><button id="reload-video" class="icon-button" aria-label="Reload Helltube">↻</button><button id="video-settings">Server ↗</button></div></header>
+    <section id="video-pane" class="video-pane dock-panel" data-panel="video" aria-label="Helltube video sharing">
+      <header class="panel-header"><div class="video-actions"><button id="reload-video" class="icon-button" aria-label="Reload Helltube">↻</button><button id="video-settings">Server ↗</button></div></header>
+      <div id="video-content" class="video-content panel-body">
       <div class="video-surface"><iframe id="helltube" title="Helltube watch-together interface" referrerpolicy="no-referrer" allow="autoplay; fullscreen; display-capture; clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-popups" allowfullscreen></iframe>
         <div id="video-welcome" class="video-welcome"><span class="large-play">▶</span><span class="eyebrow">BETTER IN COMPANY</span><h2>The same screen.<br>The same moment.</h2><p>Bring your Helltube server into the room.<br>Keep the conversation going alongside it.</p><button id="video-welcome-connect" class="primary">Connect Helltube ↗</button></div>
       </div>
       <footer class="video-footer"><span><span class="dot live"></span> <span id="video-address">Choose your Helltube server</span></span><button id="video-help" class="text-button">Connection help</button></footer>
+      </div>
     </section>
   </main>
   <dialog id="connect-dialog">

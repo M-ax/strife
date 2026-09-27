@@ -56,7 +56,12 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
                 preferences.Save(preferences.Current with
                 {
                     HelltubeUrl = PreferencesStore.ValidateHelltubeUrl(url).AbsoluteUri,
-                    ChatCollapsed = message["chatCollapsed"]?.GetValue<bool>() ?? preferences.Current.ChatCollapsed
+                    ChatCollapsed = message["chatCollapsed"]?.GetValue<bool>() ?? preferences.Current.ChatCollapsed,
+                    WorkspaceLayout = message["workspaceLayout"] is { } layout
+                        ? layout is JsonObject && layout.ToJsonString().Length <= 8192
+                            ? JsonSerializer.SerializeToElement(layout)
+                            : throw new ArgumentException("Invalid workspace layout.")
+                        : preferences.Current.WorkspaceLayout
                 });
                 Send(new { type = "preferences", value = preferences.Current,
                     videoUrl = loadVideo is null ? preferences.Current.HelltubeUrl : await loadVideo(preferences.Current.HelltubeUrl) });

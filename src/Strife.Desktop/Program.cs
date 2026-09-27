@@ -38,8 +38,10 @@ public static class Program
         var origin = new Uri(address + "/");
         var voice = new VoiceEngine(profile);
         var video = new HelltubeProxy(origin);
-        var app = new PhotinoApplication();
+        var icon = Path.Combine(AppContext.BaseDirectory, "wwwroot", "assets", "strife.ico");
+        var app = new PhotinoApplication().SetIconPath(icon);
         var window = new PhotinoWindow().SetTitle("Strife").SetUseOsDefaultSize(false).SetSize(1480, 900).SetMinSize(900, 620)
+            .SetIconFile(icon)
             .SetUserDataFolder(Path.Combine(profile, "webview"))
             .SetDevToolsEnabled(args.Contains("--devtools"))
             .SetMediaAutoplayEnabled(true).SetMediaStreamEnabled(true);

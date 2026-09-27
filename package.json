@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "icons": "node scripts/render-icons.mjs",
     "test": "node --test tests/web/*.test.js",
     "test:browser": "node --test tests/web/browser.integration.js",
     "test:desktop": "node --test tests/web/desktop.integration.js"

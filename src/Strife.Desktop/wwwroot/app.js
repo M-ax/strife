@@ -1,4 +1,5 @@
 import { organizeChannels, validateVideoUrl } from './model.js';
+import { createWorkspace } from './layout.js';
 
 const $ = id => document.getElementById(id);
 // Keep the per-launch capability in this history entry so F5 can reattach.
@@ -22,11 +23,13 @@ function request(command, data = {}) {
 async function run(command, data) {
   try { return await request(command, data); } catch (error) { notice(error.message); throw error; }
 }
-function setChatCollapsed(collapsed) {
-  $('workspace').classList.toggle('chat-collapsed', collapsed);
-  $('expand-chat').hidden = !collapsed;
-  $('collapse-chat').setAttribute('aria-expanded', String(!collapsed));
-  if (!collapsed) $('unread-dot').hidden = true;
+let layoutLoaded = false;
+const workspace = createWorkspace($('workspace'), layout => {
+  if (native) run('preferences', { workspaceLayout: layout, chatCollapsed: layout.collapsed.chat }).catch(() => {});
+  else { try { localStorage.setItem('strife-workspace', JSON.stringify(layout)); } catch {} }
+});
+if (!native) {
+  try { workspace.restore(JSON.parse(localStorage.getItem('strife-workspace'))); } catch {}
 }
 function openVideoSettings() {
   $('helltube-url').value = preferences.helltubeUrl || 'http://127.0.0.1:3000';
@@ -107,7 +110,9 @@ function receive(raw) {
     clearTimeout(item.timer); pending.delete(message.id);
     message.ok ? item.resolve(message) : item.reject(new Error(message.error || 'The command failed.'));
   } else if (message.type === 'preferences') {
-    preferences = message.value; setChatCollapsed(!!preferences.chatCollapsed);
+    preferences = message.value;
+    // Only hydrate once: acknowledgements for earlier drags must not undo newer moves.
+    if (!layoutLoaded) { workspace.restore(preferences.workspaceLayout, !!preferences.chatCollapsed); layoutLoaded = true; }
     if (message.videoUrl || (!currentVideo && preferences.helltubeUrl)) loadVideo(message.videoUrl || preferences.helltubeUrl);
     showState(state);
   } else if (message.type === 'engine') {
@@ -119,7 +124,7 @@ function receive(raw) {
     document.querySelectorAll('[data-native]').forEach(button => button.disabled = !engineReady);
   } else if (message.type === 'state') showState(message);
   else if (message.type === 'log') {
-    if ($('workspace').classList.contains('chat-collapsed') && lastLog && lastLog !== message.text) $('unread-dot').hidden = false;
+    if (workspace.isCollapsed('chat') && lastLog && lastLog !== message.text) $('unread-dot').hidden = false;
     const log = $('chat-log'), nearBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 50;
     lastLog = message.text; log.textContent = message.text;
     if (nearBottom) log.scrollTop = log.scrollHeight;
@@ -144,8 +149,6 @@ $('disconnect-button').onclick = () => run('disconnect').catch(() => {});
 $('mute-button').onclick = () => run('mute').catch(() => {});
 $('deafen-button').onclick = () => run('deafen').catch(() => {});
 $('channel-search').oninput = renderTree;
-$('collapse-chat').onclick = () => { setChatCollapsed(true); run('preferences', { chatCollapsed: true }).catch(() => {}); };
-$('expand-chat').onclick = () => { setChatCollapsed(false); run('preferences', { chatCollapsed: false }).catch(() => {}); };
 $('chat-form').onsubmit = async event => {
   event.preventDefault(); const text = $('chat-message').value; if (!text.trim()) return;
   $('send-chat').disabled = true;

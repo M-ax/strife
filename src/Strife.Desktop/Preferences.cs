@@ -3,7 +3,8 @@ using System.Text.Json;
 namespace Strife;
 
 public sealed record Preferences(string HelltubeUrl = "http://127.0.0.1:3000",
-    string MumbleHost = "", int MumblePort = 64738, string Username = "", bool ChatCollapsed = false);
+    string MumbleHost = "", int MumblePort = 64738, string Username = "", bool ChatCollapsed = false,
+    JsonElement? WorkspaceLayout = null);
 
 public sealed class PreferencesStore(string directory)
 {
