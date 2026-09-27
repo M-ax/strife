@@ -26,8 +26,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runtime: osx-arm64
-            os: macos-15
+          - runtime: osx-x64
+            os: macos-15-intel
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     defaults:
@@ -85,7 +85,7 @@ jobs:
         run: ./scripts/prepare-release.ps1 -Runtime '${{ matrix.runtime }}'
       - name: Build native voice
         if: steps.voice-cache.outputs.cache-hit != 'true'
-        run: ./scripts/build-voice.ps1 -Parallel 3
+        run: ./scripts/build-voice.ps1 -Parallel 4
       - name: Cache compiled native voice
         if: steps.voice-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
