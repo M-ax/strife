@@ -93,6 +93,17 @@ internal static class NativeSmoke
             await alice.SendAsync(new { command = "deafen", id = "deafen" });
             await Until(() => Task.FromResult(alice.LastState?.GetProperty("deafened").GetBoolean() == true), "deafen state");
             check(true, "native deafen state reflected in UI bridge");
+            var snapshots = new List<JsonElement>();
+            var shell = new Uri("http://127.0.0.1:12345/");
+            var preferences = new PreferencesStore(directory); preferences.Load();
+            var bridge = new DesktopBridge(preferences, alice, shell,
+                text => snapshots.Add(JsonSerializer.Deserialize<JsonElement>(text)));
+            var session = alice.LastState!.Value.GetProperty("session").GetInt32();
+            await bridge.ReceiveAsync(shell, JsonSerializer.Serialize(new { command = "ready", id = "reload", token = bridge.Token }));
+            var restored = snapshots.Single(m => m.GetProperty("type").GetString() == "state");
+            check(restored.GetProperty("connected").GetBoolean() && restored.GetProperty("session").GetInt32() == session &&
+                restored.GetProperty("deafened").GetBoolean() && restored.GetProperty("users").GetArrayLength() == 2,
+                "refreshed UI receives the existing Mumble session and current controls without reconnecting");
             await alice.SendAsync(new { command = "join", id = "join-invalid", channel = 999999 });
             await Until(() => Task.FromResult(aliceMessages.Any(m => m.GetProperty("type").GetString() == "result" &&
                 m.GetProperty("id").GetString() == "join-invalid" && !m.GetProperty("ok").GetBoolean())), "invalid channel rejection");

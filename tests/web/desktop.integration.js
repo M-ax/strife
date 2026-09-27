@@ -79,7 +79,7 @@ async function checkNativeDialogs(page, hostPid) {
   }
 }
 
-test('real PhotinoX, native voice engine and Helltube sign-in in one window', { timeout: 90000 }, async () => {
+test('real PhotinoX, native voice engine and Helltube sign-in in one window', { timeout: 90000 }, async t => {
   const checkout = process.env.HELLTUBE_SOURCE || 'C:/Users/Max/WebstormProjects/helltube';
   const { createApp } = await import(pathToFileURL(path.join(checkout, 'server/app.js')));
   const directory = await mkdtemp(path.resolve('artifacts/desktop-test-'));
@@ -115,7 +115,7 @@ test('real PhotinoX, native voice engine and Helltube sign-in in one window', { 
     assert.ok(page, 'PhotinoX WebView page exists');
     await page.getByText('RNNoise · enabled').waitFor({ timeout: 40000 });
     assert.equal(await page.locator('#engine-label').textContent(), 'Voice engine ready');
-    await checkNativeDialogs(page, app.pid);
+    await t.test('native dialog foreground and ownership', () => checkNativeDialogs(page, app.pid));
     const frame = page.frameLocator('#helltube');
     await frame.getByLabel('Username', { exact: true }).fill('admin');
     await frame.getByLabel('Password', { exact: true }).fill('garbageTime_');
@@ -128,6 +128,20 @@ test('real PhotinoX, native voice engine and Helltube sign-in in one window', { 
     await page.getByRole('button', { name: 'Expand chat', exact: true }).click();
     await page.getByRole('button', { name: '♩ Mute', exact: true }).click();
     await page.waitForFunction(() => document.getElementById('mute-button').getAttribute('aria-pressed') === 'true');
+    const embeddedUrl = await page.locator('#helltube').getAttribute('src');
+    // CDP key events do not invoke WebView2's native F5 accelerator.
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('engine-label').textContent === 'Voice engine ready');
+    await page.waitForFunction(() => document.getElementById('mute-button').getAttribute('aria-pressed') === 'true');
+    await frame.getByRole('button', { name: 'Your files', exact: true }).waitFor();
+    assert.equal(await page.locator('#helltube').getAttribute('src'), embeddedUrl);
+    await page.locator('#video-settings').click();
+    assert.equal(await page.locator('#helltube-url').inputValue(), new URL(videoUrl).href);
+    await page.locator('#video-dialog button.close-dialog').last().click();
+    // A second refresh catches capabilities accidentally retained for only one load.
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('engine-label').textContent === 'Voice engine ready');
+    await frame.getByRole('button', { name: 'Your files', exact: true }).waitFor();
     await page.screenshot({ path: 'artifacts/strife-desktop.png' });
     await page.locator('#menu summary').click();
     await page.getByRole('button', { name: 'Quit Strife' }).click();

@@ -9,8 +9,8 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 
 namespace Strife;
 
-// Helltube deliberately denies framing. Serve it on a separate loopback origin,
-// changing only the embedding policy and transport addresses, never the shell origin.
+// Keep Helltube on a separate, same-site loopback origin for its Strict cookies.
+// Narrow framing to this shell, including compatibility with older Helltube servers.
 public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
 {
     private readonly Dictionary<string, Endpoint> endpoints = [];

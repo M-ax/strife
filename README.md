@@ -37,11 +37,11 @@ RNNoise is compiled in and selected by default in every new Strife profile, befo
 
 Chat messages go to the current voice channel. Incoming Mumble text and server notices are rendered as plain text; rich HTML and image attachments are not rendered in the privileged desktop UI.
 
-Helltube's normal headers deny framing. Strife uses a separate loopback proxy origin to embed it without changing the existing server. HTTP, WebSockets, uploads and media remain served by Helltube; the proxy limits embedding to Strife's shell and forwards the original upstream Origin for authentication. Cookies are namespaced per upstream server, with HttpOnly and SameSite preserved; HTTPS remains verified on the connection to the upstream server. Browser permissions and WebView2 media capabilities still govern screen capture, DRM, and provider playback. No cross-service account linking or channel-to-room synchronization is assumed.
+Helltube permits framing by local desktop origins. Strife uses a separate loopback proxy origin to keep Helltube's login cookies working with remote servers and older deployments. HTTP, WebSockets, uploads and media remain served by Helltube; the proxy limits embedding to Strife's shell and forwards the original upstream Origin for authentication. Cookies are namespaced per upstream server, with HttpOnly and SameSite preserved; HTTPS remains verified on the connection to the upstream server. Browser permissions and WebView2 media capabilities still govern screen capture, DRM, and provider playback. No cross-service account linking or channel-to-room synchronization is assumed.
 
 ## Profiles and process lifetime
 
-Settings, identity, server certificate pins, and browser session storage live under %LOCALAPPDATA%\Strife. Strife stores the last server address/username, Helltube URL, and chat collapse preference. The connection form's password is passed to the voice engine in memory and is not written into Strife's preferences.
+Settings, identity, server certificate pins, and browser session storage live under %LOCALAPPDATA%\Strife. Strife stores the last server address/port/username, Helltube URL, and chat collapse preference. F5 restores those settings and the running Mumble session without reconnecting voice; Helltube reloads into its saved login and selected room. The connection form's password is passed to the voice engine in memory and is not written into Strife's preferences.
 
 STRIFE_PROFILE overrides the profile directory, and STRIFE_VOICE_ENGINE overrides the native executable path. Do not share a profile between simultaneous running instances.
 

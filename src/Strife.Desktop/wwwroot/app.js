@@ -1,8 +1,9 @@
 import { organizeChannels, validateVideoUrl } from './model.js';
 
 const $ = id => document.getElementById(id);
-const token = location.hash.slice(1);
-history.replaceState(null, '', location.pathname);
+// Keep the per-launch capability in this history entry so F5 can reattach.
+const token = location.hash.slice(1) || history.state?.strifeToken || '';
+history.replaceState({ strifeToken: token }, '', location.pathname);
 const pending = new Map(), folded = new Set();
 let state = { connected: false, channels: [], users: [] };
 let preferences = {}, engineReady = false, currentVideo = '', lastLog = '', startPending = false;
@@ -107,7 +108,8 @@ function receive(raw) {
     message.ok ? item.resolve(message) : item.reject(new Error(message.error || 'The command failed.'));
   } else if (message.type === 'preferences') {
     preferences = message.value; setChatCollapsed(!!preferences.chatCollapsed);
-    if (preferences.helltubeUrl) loadVideo(message.videoUrl || preferences.helltubeUrl);
+    if (message.videoUrl || (!currentVideo && preferences.helltubeUrl)) loadVideo(message.videoUrl || preferences.helltubeUrl);
+    showState(state);
   } else if (message.type === 'engine') {
     engineReady = message.ready; $('engine-label').textContent = engineReady ? 'Voice engine ready' : 'Voice engine offline';
     if (!engineReady) {
@@ -135,7 +137,7 @@ $('connect-form').onsubmit = async event => {
   event.preventDefault(); $('submit-connect').disabled = true;
   try {
     await run('connect', { host: $('host').value, port: Number($('port').value), username: $('username').value, password: $('password').value });
-    preferences.mumbleHost = $('host').value; $('password').value = ''; $('connect-dialog').close();
+    $('password').value = ''; $('connect-dialog').close();
   } catch {} finally { $('submit-connect').disabled = false; }
 };
 $('disconnect-button').onclick = () => run('disconnect').catch(() => {});
@@ -167,5 +169,5 @@ async function startEngine() {
 $('retry-engine').onclick = () => { $('menu').open = false; startEngine(); };
 $('quit').onclick = () => run('quit').catch(() => {});
 renderTree();
-if (native) request('ready').then(startEngine).catch(error => notice(error.message));
+if (native) request('ready').then(() => { if (!engineReady) return startEngine(); }).catch(error => notice(error.message));
 else { $('engine-label').textContent = 'Desktop preview'; document.querySelectorAll('[data-native]').forEach(b => b.disabled = true); }

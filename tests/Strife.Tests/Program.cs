@@ -43,6 +43,15 @@ await using (var voice = new VoiceEngine(directory))
     await bridge.ReceiveAsync(origin, Message(bridge.Token));
     Check(replies.Any(r => r.GetProperty("type").GetString() == "preferences"), "trusted desktop receives preferences");
     replies.Clear();
+    await bridge.ReceiveAsync(origin, JsonSerializer.Serialize(new { token = bridge.Token, command = "connect", id = "save",
+        host = " saved.voice.test ", port = 64739, username = " SavedUser ", password = "do-not-save" }));
+    var saved = new PreferencesStore(directory); saved.Load();
+    Check(saved.Current.MumbleHost == "saved.voice.test" && saved.Current.MumblePort == 64739 && saved.Current.Username == "SavedUser",
+        "Mumble address is saved even while the voice engine is unavailable");
+    Check(replies.Any(r => r.GetProperty("type").GetString() == "preferences" &&
+        r.GetProperty("value").GetProperty("username").GetString() == "SavedUser"), "saved connection form is synchronized to the UI");
+    Check(!File.ReadAllText(Path.Combine(directory, "preferences.json")).Contains("do-not-save"), "connection password is never persisted");
+    replies.Clear();
     await bridge.ReceiveAsync(origin, Message(bridge.Token, "arbitrary-executable"));
     Check(replies.Single().GetProperty("ok").GetBoolean() == false, "command allowlist rejects unknown operation");
 }

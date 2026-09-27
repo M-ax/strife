@@ -25,7 +25,7 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
       if (window !== window.top) return;
       let receiver;
       window.commands = [];
-      const prefs = { helltubeUrl: videoUrl, mumbleHost: 'voice.example.test', username: 'Alice', chatCollapsed: false };
+      const prefs = JSON.parse(localStorage.getItem('fixture-preferences')) || { helltubeUrl: videoUrl, mumbleHost: 'voice.example.test', mumblePort: 64738, username: 'Alice', chatCollapsed: false };
       const state = { type: 'state', connected: true, session: 7, rnnoise: true, transmitMode: 2, pttBound: true, muted: false, deafened: false,
         channels: [{ id: 0, parent: -1, position: 0, name: 'Root' }, { id: 4, parent: 0, position: 0, name: 'Lounge' }],
         users: [{ id: 7, name: 'Alice', channel: 4, talking: true }] };
@@ -34,13 +34,25 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
         receiveMessage(callback) { receiver = callback; },
         sendMessage(raw) {
           const m = JSON.parse(raw); window.commands.push(m);
+          if (m.token !== 'test-capability') return;
           queueMicrotask(() => {
-            if (m.command === 'ready') window.deliver({ type: 'preferences', value: prefs });
+            if (m.command === 'ready') {
+              window.deliver({ type: 'preferences', value: prefs, videoUrl: prefs.helltubeUrl });
+              window.deliver(state); window.deliver({ type: 'engine', ready: true });
+            }
             if (m.command === 'start') { window.deliver({ type: 'engine', ready: true }); window.deliver(state); }
             if (m.command === 'preferences') {
               if ('chatCollapsed' in m) prefs.chatCollapsed = m.chatCollapsed;
               if (m.helltubeUrl) prefs.helltubeUrl = m.helltubeUrl;
+              localStorage.setItem('fixture-preferences', JSON.stringify(prefs));
+              window.deliver({ type: 'preferences', value: prefs, videoUrl: prefs.helltubeUrl });
+            }
+            if (m.command === 'disconnect') { state.connected = false; window.deliver(state); }
+            if (m.command === 'connect') {
+              Object.assign(prefs, { mumbleHost: m.host.trim(), mumblePort: m.port, username: m.username.trim() });
+              localStorage.setItem('fixture-preferences', JSON.stringify(prefs));
               window.deliver({ type: 'preferences', value: prefs });
+              state.connected = true; window.deliver(state);
             }
             window.deliver({ type: 'result', id: m.id, ok: true });
           });
@@ -73,6 +85,42 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     assert.equal(await page.locator('#helltube').evaluate(frame => {
       try { return !!frame.contentWindow.document; } catch { return false; }
     }), false);
+    const savedVideo = videoUrl + '/watch?room=lounge#player';
+    await page.locator('#video-settings').click();
+    await page.locator('#helltube-url').fill(savedVideo);
+    await page.locator('#video-form button[type="submit"]').click();
+    await page.frameLocator('#helltube').getByPlaceholder('Room name').fill('Keep this iframe');
+    await page.locator('#disconnect-button').click();
+    await page.locator('#connect-button').click();
+    await page.locator('#host').fill('saved.voice.test');
+    await page.locator('#port').fill('64739');
+    await page.locator('#username').fill('SavedUser');
+    await page.locator('#password').fill('not-saved');
+    await page.locator('#submit-connect').click();
+    await page.waitForFunction(() => !document.getElementById('connect-dialog').open);
+    assert.equal(await page.frameLocator('#helltube').getByPlaceholder('Room name').inputValue(), 'Keep this iframe');
+    await page.locator('#collapse-chat').click();
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('engine-label').textContent === 'Voice engine ready');
+    await page.frameLocator('#helltube').getByRole('heading', { name: 'Helltube fixture' }).waitFor();
+    assert.equal(new URL(page.url()).hash, '');
+    assert.equal(await page.locator('#server-name').textContent(), 'saved.voice.test');
+    assert.equal(await page.locator('#chat-message').isDisabled(), false);
+    assert.equal(await page.locator('.channel-user.talking').count(), 1);
+    assert.equal(await page.locator('#expand-chat').isVisible(), true);
+    assert.equal(await page.locator('#helltube').getAttribute('src'), savedVideo);
+    assert.ok((await page.evaluate(() => window.commands)).every(m => m.token === 'test-capability'));
+    assert.ok(!(await page.evaluate(() => window.commands)).some(m => m.command === 'connect' || m.command === 'start'));
+    await page.locator('#disconnect-button').click();
+    await page.locator('#connect-button').click();
+    assert.equal(await page.locator('#host').inputValue(), 'saved.voice.test');
+    assert.equal(await page.locator('#port').inputValue(), '64739');
+    assert.equal(await page.locator('#username').inputValue(), 'SavedUser');
+    assert.equal(await page.locator('#password').inputValue(), '');
+    await page.locator('#connect-dialog button.close-dialog').last().click();
+    await page.locator('#video-settings').click();
+    assert.equal(await page.locator('#helltube-url').inputValue(), savedVideo);
+    await page.locator('#video-dialog button.close-dialog').last().click();
     await page.evaluate(() => window.deliver({ type: 'engine', ready: false, error: 'Fixture disconnect' }));
     assert.equal(await page.locator('#chat-message').isDisabled(), true);
     assert.equal(await page.locator('.channel-user').count(), 0);

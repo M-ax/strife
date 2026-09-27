@@ -68,8 +68,9 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
                 var port = message["port"]!.GetValue<int>();
                 var username = message["username"]!.GetValue<string>();
                 var url = PreferencesStore.MumbleUrl(host, port, username, message["password"]?.GetValue<string>() ?? "");
-                if (!voice.IsReady) throw new InvalidOperationException("Voice engine is not ready.");
                 preferences.Save(preferences.Current with { MumbleHost = host.Trim(), MumblePort = port, Username = username.Trim() });
+                Send(new { type = "preferences", value = preferences.Current });
+                if (!voice.IsReady) throw new InvalidOperationException("Voice engine is not ready.");
                 await voice.SendAsync(new { command, id, url });
             }
             else if (VoiceCommands.Contains(command))
