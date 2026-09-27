@@ -78,10 +78,24 @@ jobs:
         with:
           path: artifacts/build-env
           key: native-${{ matrix.runtime }}-${{ hashFiles('packaging/native-dependencies.json') }}
+      - name: Restore compiled native voice
+        id: voice-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: artifacts/voice
+          key: voice-${{ matrix.runtime }}-${{ hashFiles('native/**', 'scripts/build-voice.ps1', 'scripts/prepare-release.ps1', 'packaging/native-dependencies.json') }}
       - name: Fetch pinned native sources and toolchain
+        if: steps.voice-cache.outputs.cache-hit != 'true'
         run: ./scripts/prepare-release.ps1 -Runtime '${{ matrix.runtime }}'
       - name: Build native voice
+        if: steps.voice-cache.outputs.cache-hit != 'true'
         run: ./scripts/build-voice.ps1 -Parallel 3
+      - name: Cache compiled native voice
+        if: steps.voice-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: artifacts/voice
+          key: voice-${{ matrix.runtime }}-${{ hashFiles('native/**', 'scripts/build-voice.ps1', 'scripts/prepare-release.ps1', 'packaging/native-dependencies.json') }}
       - name: Run managed and web tests
         run: |
           dotnet run --project tests/Strife.Tests -c Release
