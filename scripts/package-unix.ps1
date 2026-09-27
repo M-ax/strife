@@ -34,12 +34,28 @@ if ($IsMacOS) {
     & iconutil -c icns $iconset -o (Join-Path $contents 'Resources/strife.icns')
     if ($LASTEXITCODE) { throw 'macOS icon packaging failed.' }
     # Give the sidecar its own identity and microphone usage description.
-    $voiceApp = Join-Path $contents 'MacOS/voice/StrifeVoice.app'
+    $helpers = Join-Path $contents 'Helpers'
+    New-Item -ItemType Directory $helpers | Out-Null
+    $voiceApp = Join-Path $helpers 'StrifeVoice.app'
+    Move-Item -LiteralPath (Join-Path $contents 'MacOS/voice/StrifeVoice.app') -Destination $voiceApp
+    & ln -s '../../Helpers/StrifeVoice.app' (Join-Path $contents 'MacOS/voice/StrifeVoice.app')
+    if ($LASTEXITCODE) { throw 'Cannot link the voice app.' }
+    # codesign treats everything in MacOS as native code. Managed assemblies,
+    # configuration, web assets and notices belong in Resources. Relative links
+    # preserve .NET's app-local lookup paths without signing PE files as Mach-O.
+    # https://developer.apple.com/library/archive/technotes/tn2206/_index.html
+    foreach ($item in Get-ChildItem -LiteralPath (Join-Path $contents 'MacOS')) {
+        if (!$item.PSIsContainer -and ($item.Extension -eq '.dylib' -or $item.Name -in @('Strife', 'createdump'))) { continue }
+        Move-Item -LiteralPath $item.FullName -Destination (Join-Path $contents "Resources/$($item.Name)")
+        & ln -s "../Resources/$($item.Name)" $item.FullName
+        if ($LASTEXITCODE) { throw "Cannot link resource: $($item.Name)" }
+    }
     & /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier io.github.m-ax.strife.voice' (Join-Path $voiceApp 'Contents/Info.plist')
     if ($LASTEXITCODE) { throw 'Cannot set the voice bundle identifier.' }
     # Ad-hoc signing preserves executable integrity on Apple Silicon. Developer
     # ID signing/notarization requires the publisher's Apple credentials.
-    foreach ($binary in Get-ChildItem (Join-Path $contents 'MacOS') -Recurse -File | Where-Object { $_.Extension -eq '.dylib' -or $_.Name -in @('Strife', 'createdump', 'Mumble') }) {
+    # Sign nested code first; signing the outer app also signs its main executable.
+    foreach ($binary in Get-ChildItem $contents -Recurse -File | Where-Object { $_.Extension -eq '.dylib' -or $_.Name -in @('createdump', 'Mumble') }) {
         & codesign --force --sign - $binary.FullName
         if ($LASTEXITCODE) { throw "Ad-hoc signing failed: $($binary.Name)" }
     }
