@@ -1,4 +1,5 @@
 using System.Net;
+using System.IO.Compression;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -51,6 +52,27 @@ internal static class ProxySmoke
         });
         upstream.MapGet("/api/me", context => context.Response.WriteAsJsonAsync(new { cookie = context.Request.Headers.Cookie.ToString() }));
         upstream.MapGet("/api/config", () => new { bareMetalOrigin = Origin(direct) });
+        const string commit = "0123456789abcdef0123456789abcdef01234567";
+        string? versionEncodings = null;
+        upstream.MapGet("/api/version", async context =>
+        {
+            versionEncodings = context.Request.Headers.AcceptEncoding.ToString();
+            context.Response.ContentType = "application/json; charset=utf-8";
+            context.Response.Headers.ETag = "\"upstream-version\"";
+            if (versionEncodings.Contains("zstd"))
+            {
+                // A real zstd response, as selected by Cloudflare for Chromium.
+                context.Response.Headers.ContentEncoding = "zstd";
+                await context.Response.Body.WriteAsync(Convert.FromBase64String(
+                    "KLUv/SA1HQEA6HsiY29tbWl0IjoiMDEyMzQ1Njc4OWFiY2RlZiJ9AQAPOMc="));
+            }
+            else
+            {
+                context.Response.Headers.ContentEncoding = "gzip";
+                await using var compressed = new GZipStream(context.Response.Body, CompressionMode.Compress, leaveOpen: true);
+                await compressed.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { commit })));
+            }
+        });
         upstream.MapGet("/api/access", () => new { url = Origin(direct) + "/direct/blob?grant=fixture" });
         upstream.MapPost("/api/upload", async context =>
         {
@@ -77,6 +99,16 @@ internal static class ProxySmoke
         using var index = await client.GetAsync(url);
         check(!index.Headers.Contains("X-Frame-Options") &&
             index.Headers.GetValues("Content-Security-Policy").Single().Contains("frame-ancestors http://127.0.0.1:12345"), "proxy framing policy allows only the Strife shell");
+        using var versionRequest = new HttpRequestMessage(HttpMethod.Get, url + "api/version");
+        versionRequest.Headers.TryAddWithoutValidation("Accept-Encoding", "gzip, deflate, br, zstd");
+        using var versionResponse = await client.SendAsync(versionRequest);
+        check(versionEncodings is not null && versionEncodings.Contains("gzip") && !versionEncodings.Contains("zstd"),
+            "proxy negotiates upstream encodings it can decode even when Chromium offers zstd");
+        check(versionResponse.IsSuccessStatusCode && !versionResponse.Content.Headers.ContentEncoding.Any()
+            && versionResponse.Headers.ETag is null,
+            "rewritten compressed API responses have decoded-body headers");
+        var version = JsonSerializer.Deserialize<JsonElement>(await versionResponse.Content.ReadAsStringAsync());
+        check(version.GetProperty("commit").GetString() == commit, "Metal commit survives a compressed API response");
         using var login = new HttpRequestMessage(HttpMethod.Post, url + "api/login");
         login.Headers.Add("Origin", localOrigin);
         using var loggedIn = await client.SendAsync(login);

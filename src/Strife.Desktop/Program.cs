@@ -17,7 +17,10 @@ public static class Program
         if (profileLock is null) return 1;
         var preferences = new PreferencesStore(profile);
         preferences.Load();
-        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [] });
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
+        {
+            Args = [], ContentRootPath = AppContext.BaseDirectory
+        });
         builder.Logging.ClearProviders();
         builder.WebHost.UseKestrel(options => options.ListenLocalhostForStrife());
         var server = builder.Build();
@@ -38,7 +41,7 @@ public static class Program
         var origin = new Uri(address + "/");
         var voice = new VoiceEngine(profile);
         var video = new HelltubeProxy(origin);
-        var icon = Path.Combine(AppContext.BaseDirectory, "wwwroot", "assets", "strife.ico");
+        var icon = Path.Combine(AppContext.BaseDirectory, "wwwroot", "assets", OperatingSystem.IsWindows() ? "strife.ico" : "strife.png");
         var app = new PhotinoApplication().SetIconPath(icon);
         var window = new PhotinoWindow().SetTitle("Strife").SetUseOsDefaultSize(false).SetSize(1480, 900).SetMinSize(900, 620)
             .SetIconFile(icon)
@@ -53,7 +56,7 @@ public static class Program
                 if (!closing) window.SendWebMessage(message);
             });
         }
-        var bridge = new DesktopBridge(preferences, voice, origin, Publish, () => app.Dispatcher.BeginInvoke(window.Close), video.LoadAsync);
+        using var bridge = new DesktopBridge(preferences, voice, origin, Publish, () => app.Dispatcher.BeginInvoke(window.Close), video.LoadAsync);
         voice.Message += message => Publish(message.GetRawText());
         voice.Stopped += error => Publish(System.Text.Json.JsonSerializer.Serialize(new { type = "engine", ready = false, error }));
         window.RegisterCreatedHandler((_, _) => voice.OwnerWindow = window.WindowHandle);

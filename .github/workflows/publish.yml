@@ -1,0 +1,146 @@
+name: Publish
+
+on:
+  push:
+    branches: ['build/release-0.1.0-preview.2']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+  push:
+    branches: ['build/release-0.1.0-preview.2']
+        description: 'Version to build (for example 0.1.0 or 0.2.0-rc.1); uploads workflow artifacts only'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.runtime }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: osx-x64
+            os: macos-15-intel
+          - runtime: osx-arm64
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.version || '0.1.0-preview.2' }}
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate version and runner
+        run: |
+          . ./scripts/release-common.ps1
+          $version = Get-StrifeVersion $env:RELEASE_VERSION
+          if ((Get-StrifeRuntime) -ne '${{ matrix.runtime }}') { throw 'Runner architecture does not match the release target.' }
+          "STRIFE_VERSION=$version" >> $env:GITHUB_ENV
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install Linux build and runtime dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libasound2-dev libsm-dev \
+            '^libxcb.*-dev' libx11-xcb-dev libglu1-mesa-dev libxrender-dev libxi-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libegl1-mesa-dev \
+            libgtk-3-0 libwebkit2gtk-4.1-0 libnotify4 xvfb xauth
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install ninja xz
+      - name: Install Windows packaging tools
+        if: runner.os == 'Windows'
+        run: |
+          choco install innosetup --version=6.7.3 --yes --no-progress
+          if ($LASTEXITCODE) { throw 'Inno Setup installation failed.' }
+      - uses: actions/cache@v5
+        with:
+          path: artifacts/build-env
+          key: native-${{ matrix.runtime }}-${{ hashFiles('packaging/native-dependencies.json') }}
+      - name: Fetch pinned native sources and toolchain
+        run: ./scripts/prepare-release.ps1 -Runtime '${{ matrix.runtime }}'
+      - name: Build native voice
+        run: ./scripts/build-voice.ps1 -Parallel 3
+      - name: Run managed and web tests
+        run: |
+          dotnet run --project tests/Strife.Tests -c Release
+          if ($LASTEXITCODE) { throw 'Managed tests failed.' }
+          npm ci
+          if ($LASTEXITCODE) { throw 'npm restore failed.' }
+          npm test
+          if ($LASTEXITCODE) { throw 'Web tests failed.' }
+      - name: Publish and package
+        run: ./scripts/publish.ps1 -Runtime '${{ matrix.runtime }}' -Version $env:STRIFE_VERSION
+      - name: Check packaged native engine
+        run: ./scripts/test-package.ps1 -Runtime '${{ matrix.runtime }}'
+      - name: Test Windows installation, upgrade and removal
+        if: runner.os == 'Windows'
+        run: ./tests/windows/installer.ps1 -Installer (Join-Path $PWD "artifacts/release/Strife-$env:STRIFE_VERSION-win-x64-Setup.exe")
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Strife-${{ matrix.runtime }}
+          overwrite: true
+          path: artifacts/release/*
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-${{ matrix.runtime }}
+          overwrite: true
+          path: |
+            artifacts/installer-test/*.log
+            artifacts/mumble-build/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
+
+  release:
+    name: Attach release assets
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Strife-*
+          path: release
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: release
+        shell: bash
+        run: sha256sum Strife-* > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Strife-checksums
+          overwrite: true
+          path: release/SHA256SUMS.txt
+      - name: Attach all packages to the published release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: gh release upload "$RELEASE_TAG" release/* --clobber

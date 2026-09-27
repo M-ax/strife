@@ -49,7 +49,10 @@ public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
 
         public async Task StartAsync()
         {
-            var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [] });
+            var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
+            {
+                Args = [], ContentRootPath = AppContext.BaseDirectory
+            });
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
             // Uploads are streamed; Helltube applies its own authenticated quotas.
@@ -93,6 +96,9 @@ public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
                 foreach (var header in context.Request.Headers)
                 {
                     if (HopHeaders.Contains(header.Key) || header.Key.Equals("Cookie", StringComparison.OrdinalIgnoreCase)
+                        // Let HttpClient advertise only encodings it can decode. Chromium also
+                        // offers zstd, which would corrupt JSON/manifest rewrites here.
+                        || header.Key.Equals("Accept-Encoding", StringComparison.OrdinalIgnoreCase)
                         || header.Key.Equals("Origin", StringComparison.OrdinalIgnoreCase) || header.Key.Equals("Referer", StringComparison.OrdinalIgnoreCase)) continue;
                     if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray()))
                         request.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());

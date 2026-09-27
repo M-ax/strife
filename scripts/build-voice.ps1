@@ -1,12 +1,27 @@
+#requires -Version 7.0
 param(
-    [string]$MumbleSource = 'C:\Users\Max\CLionProjects\mumble',
-    [string]$VcpkgRoot = 'C:\Users\Max\Source\vcpkg-master',
+    [string]$MumbleSource = $env:STRIFE_MUMBLE_SOURCE,
+    [string]$VcpkgRoot = $env:STRIFE_VCPKG_ROOT,
+    [string]$Generator,
+    [int]$Parallel = 4,
     [switch]$PrepareOnly,
     [switch]$WithServer,
     [switch]$RefreshSource
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path $PSScriptRoot -Parent
+if (!$MumbleSource) {
+    $MumbleSource = Join-Path $root 'artifacts/upstream/mumble'
+    if ($IsWindows -and !(Test-Path $MumbleSource)) { $MumbleSource = 'C:\Users\Max\CLionProjects\mumble' }
+}
+if (!$VcpkgRoot) {
+    $VcpkgRoot = Join-Path $root 'artifacts/build-env'
+    if ($IsWindows -and !(Test-Path $VcpkgRoot)) { $VcpkgRoot = 'C:\Users\Max\Source\vcpkg-master' }
+}
+$architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+$triplet = if ($IsWindows) { 'x64-windows-static-md' } elseif ($IsMacOS) { "$architecture-osx" } else { "$architecture-linux" }
+if (!$Generator) { $Generator = if ($IsWindows) { 'Visual Studio 18 2026' } else { 'Ninja' } }
 $source = Join-Path $root 'artifacts/mumble-source'
 $build = Join-Path $root 'artifacts/mumble-build'
 if (!(Test-Path (Join-Path $MumbleSource 'src/mumble/main.cpp'))) { throw 'MumbleSource must be a Mumble source checkout.' }
@@ -16,8 +31,13 @@ $stamp = Join-Path $root 'artifacts/mumble-revision.txt'
 $revision = (& git -C $MumbleSource rev-parse HEAD).Trim()
 if ($LASTEXITCODE) { throw 'Cannot resolve Mumble source revision.' }
 if (!(Test-Path $stamp) -or $RefreshSource) {
-    & robocopy $MumbleSource $source /E /XD .git .idea .junie .ollamassist cmake-build-debug build /XF asdf.txt /NFL /NDL /NJH /NJS /NP | Out-Null
-    if ($LASTEXITCODE -ge 8) { throw "Source copy failed: $LASTEXITCODE" }
+    if ($IsWindows) {
+        & robocopy $MumbleSource $source /E /XD .git .idea .junie .ollamassist cmake-build-debug build /XF asdf.txt /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "Source copy failed: $LASTEXITCODE" }
+    } else {
+        Get-ChildItem -LiteralPath $MumbleSource -Force | Where-Object { $_.Name -notin @('.git', '.idea', 'build', 'cmake-build-debug') } |
+            Copy-Item -Destination $source -Recurse -Force
+    }
     $revision | Set-Content $stamp
 } elseif ((Get-Content $stamp -Raw).Trim() -ne $revision) {
     throw 'Mumble HEAD changed. Use -RefreshSource to update the private source snapshot.'
@@ -69,20 +89,40 @@ if ($PrepareOnly) { return }
 $toolchain = Join-Path $VcpkgRoot 'scripts/buildsystems/vcpkg.cmake'
 if (!(Test-Path $toolchain)) { throw 'Pass -VcpkgRoot pointing to vcpkg with the Mumble dependencies installed.' }
 $server = if ($WithServer) { 'ON' } else { 'OFF' }
-& cmake -S $source -B $build -G 'Visual Studio 18 2026' -A x64 "-DCMAKE_TOOLCHAIN_FILE=$toolchain" '-DVCPKG_TARGET_TRIPLET=x64-windows-static-md' '-Dstatic=ON' '-DCMAKE_BUILD_TYPE=Release' '-Dzeroconf=OFF' '-Dice=OFF' '-Ddbus=OFF' '-DSOCI_MYSQL=OFF' '-DSOCI_POSTGRESQL=OFF' "-Dserver=$server" '-Dclient=ON' '-Drnnoise=ON' '-Dbundled-rnnoise=ON' '-Doverlay=OFF' '-Dplugins=OFF' '-Dpackaging=OFF' '-Dtests=OFF' '-Dupdate=OFF' '-Dcrash-report=OFF' '-Dwarnings-as-errors=OFF' '-Dlto=OFF' '-Dbundled-cli11=OFF' '-Dbundled-spdlog=OFF'
+$platformOptions = @()
+if ($IsWindows -and $Generator -like 'Visual Studio*') { $platformOptions += @('-A', 'x64') }
+if ($IsMacOS) { $platformOptions += "-DCMAKE_OSX_ARCHITECTURES=$(if ($architecture -eq 'arm64') { 'arm64' } else { 'x86_64' })" }
+& cmake -S $source -B $build -G $Generator @platformOptions "-DCMAKE_TOOLCHAIN_FILE=$toolchain" "-DVCPKG_TARGET_TRIPLET=$triplet" '-Dstatic=ON' '-DCMAKE_BUILD_TYPE=Release' '-Dzeroconf=OFF' '-Dice=OFF' '-Ddbus=OFF' '-Dspeechd=OFF' '-DSOCI_MYSQL=OFF' '-DSOCI_POSTGRESQL=OFF' "-Dserver=$server" '-Dclient=ON' '-Drnnoise=ON' '-Dbundled-rnnoise=ON' '-Doverlay=OFF' '-Dplugins=OFF' '-Dpackaging=OFF' '-Dtests=OFF' '-Dupdate=OFF' '-Dcrash-report=OFF' '-Dwarnings-as-errors=OFF' '-Dlto=OFF' '-Dbundled-cli11=OFF' '-Dbundled-spdlog=OFF'
 if ($LASTEXITCODE) { throw 'Native configuration failed.' }
 $targets = @('mumble')
 if ($WithServer) { $targets += 'mumble-server' }
-& cmake --build $build --config Release --target $targets --parallel 8
+& cmake --build $build --config Release --target $targets --parallel $Parallel
 if ($LASTEXITCODE) { throw 'Native build failed.' }
 $destination = Join-Path $root 'artifacts/voice'
-New-Item -ItemType Directory -Force $destination | Out-Null
-$exe = Get-ChildItem $build -Recurse -Filter mumble.exe | Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
-if (!$exe) { throw 'No Mumble executable was produced.' }
-Copy-Item $exe.FullName (Join-Path $destination 'strife-voice.exe') -Force
-Get-ChildItem $build -Recurse -Filter '*.dll' | Where-Object { $_.FullName -match 'Release' } | ForEach-Object { Copy-Item $_.FullName $destination -Force }
+Reset-StrifeStagingDirectory $destination
+if ($IsWindows) {
+    $exe = Join-Path $build 'Release/mumble.exe'
+    if (!(Test-Path $exe)) { $exe = Join-Path $build 'mumble.exe' }
+    Copy-Item $exe (Join-Path $destination 'strife-voice.exe') -Force
+    Copy-Item (Join-Path (Split-Path $exe) '*.dll') $destination -Force
+} elseif ($IsMacOS) {
+    & ditto (Join-Path $build 'Mumble.app') (Join-Path $destination 'StrifeVoice.app')
+    if ($LASTEXITCODE) { throw 'Voice app staging failed.' }
+} else {
+    Copy-Item (Join-Path $build 'mumble') (Join-Path $destination 'strife-voice') -Force
+    & chmod +x (Join-Path $destination 'strife-voice')
+    if ($LASTEXITCODE) { throw 'Cannot make the voice engine executable.' }
+}
 Copy-Item (Join-Path $MumbleSource 'LICENSE') (Join-Path $destination 'MUMBLE-LICENSE') -Force
 Copy-Item (Join-Path $MumbleSource '3rdparty/rnnoise-src/COPYING') (Join-Path $destination 'RNNOISE-LICENSE') -Force
 Copy-Item (Join-Path $MumbleSource '3rdPartyLicenses') $destination -Recurse -Force
 Copy-Item (Join-Path $root 'artifacts/mumble-revision.txt') $destination -Force
+$licenseDirectory = Join-Path $destination 'dependency-licenses'
+New-Item -ItemType Directory -Force $licenseDirectory | Out-Null
+Get-ChildItem (Join-Path $VcpkgRoot "installed/$triplet/share") -Directory | ForEach-Object {
+    $copyright = Join-Path $_.FullName 'copyright'
+    if (Test-Path $copyright) { Copy-Item $copyright (Join-Path $licenseDirectory "$($_.Name).txt") -Force }
+}
+@{ runtime = if ($IsWindows) { 'win-x64' } elseif ($IsMacOS) { "osx-$architecture" } else { "linux-$architecture" }; revision = $revision } |
+    ConvertTo-Json | Set-Content (Join-Path $destination 'build-info.json')
 Write-Host "Voice engine ready: $destination"

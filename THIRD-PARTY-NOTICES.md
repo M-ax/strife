@@ -7,4 +7,4 @@
 - **Other Mumble dependencies**, including Opus, SpeexDSP, OpenSSL, Protobuf, Boost, and libsndfile, retain their own licenses. Mumble's About/license UI and upstream 3rdPartyLicenses contain notices; the build preparation copies these notices alongside the engine.
 - **Helltube** runs from the user's existing deployment. Its sources/assets are not copied into Strife.
 
-These scripts build a local development artifact. Include the complete dependency license/source materials appropriate to your native toolchain and Qt license before distributing it.
+Release packages include upstream notices and the dependency copyright files supplied by the pinned vcpkg toolchain under voice/dependency-licenses. Include the complete dependency source/relinking materials appropriate to your native toolchain and Qt license when distributing it. See [release build instructions](docs/releases.md) for the pinned environments and build procedure.

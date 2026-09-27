@@ -3,10 +3,13 @@ import { PANEL_IDS, BAR, GAP, defaultLayout, restoreLayout, dockPanel, floatPane
 const titles = { rooms: 'Mumble rooms', chat: 'Voice chat', controls: 'User controls', video: 'Helltube' };
 const collapseNames = { ...titles, chat: 'chat' };
 const sides = ['top', 'bottom', 'left', 'right'];
+const HEADER_REVEAL_DISTANCE = 30;
 
 export function createWorkspace(workspace, onChange) {
   let layout = defaultLayout(), dirty = false, drag = null, geometry, menuPanel = null;
   const panels = new Map(PANEL_IDS.map(id => [id, workspace.querySelector('[data-panel="' + id + '"]')]));
+  const headers = [...panels.values()].map(panel => panel.querySelector('.panel-header'));
+  let pointer = null, proximityFrame = 0;
   const buttons = new Map(), separators = new Map();
   const make = (tag, className, text) => {
     const element = document.createElement(tag); element.className = className;
@@ -29,6 +32,31 @@ export function createWorkspace(workspace, onChange) {
   const status = make('div', 'sr-only'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   preview.hidden = hint.hidden = guides.hidden = targetGuides.hidden = true;
   workspace.append(empty, preview, guides, targetGuides, hint, menu, status);
+
+  function updateHeaderProximity() {
+    proximityFrame = 0;
+    // Read every header before writing styles; floating and collapsed headers use the same bounds.
+    const opacities = headers.map(header => {
+      if (!pointer) return 0;
+      const rect = header.getBoundingClientRect();
+      const dx = Math.max(rect.left - pointer.x, 0, pointer.x - rect.right);
+      const dy = Math.max(rect.top - pointer.y, 0, pointer.y - rect.bottom);
+      return Math.max(0, 1 - Math.hypot(dx, dy) / HEADER_REVEAL_DISTANCE);
+    });
+    headers.forEach((header, index) => header.style.setProperty('--panel-controls-proximity', opacities[index].toFixed(3)));
+  }
+  function queueHeaderProximity() {
+    if (!proximityFrame) proximityFrame = requestAnimationFrame(updateHeaderProximity);
+  }
+  function clearHeaderProximity() { pointer = null; queueHeaderProximity(); }
+  document.addEventListener('pointermove', event => {
+    if (event.pointerType === 'touch') return;
+    pointer = { x: event.clientX, y: event.clientY }; queueHeaderProximity();
+  }, { capture: true, passive: true });
+  document.addEventListener('pointerout', event => {
+    if (!event.relatedTarget || event.relatedTarget instanceof HTMLIFrameElement) clearHeaderProximity();
+  });
+  window.addEventListener('blur', clearHeaderProximity);
 
   function announce(text) { status.textContent = text; }
   function commit(text) { dirty = true; render(); onChange(structuredClone(layout)); if (text) announce(text); }
@@ -137,6 +165,7 @@ export function createWorkspace(workspace, onChange) {
       position(element, divider.rect);
     }
     for (const [path, element] of separators) if (!active.has(path)) { element.remove(); separators.delete(path); }
+    queueHeaderProximity();
   }
 
   function closeMenu(focus = false) {

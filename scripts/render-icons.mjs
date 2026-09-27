@@ -32,6 +32,8 @@ try {
     offset += images[index].length;
   }
   await writeFile(new URL('strife.ico', assets), Buffer.concat([header, ...images]));
+  await page.setViewportSize({ width: 1024, height: 1024 });
+  await writeFile(new URL('strife.png', assets), await page.screenshot({ type: 'png', omitBackground: true }));
   console.log('Generated Windows icon at ' + sizes.join(', ') + ' pixels.');
 } finally {
   await browser.close();

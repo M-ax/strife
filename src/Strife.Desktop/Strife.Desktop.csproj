@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="PhotinoX" Version="5.3.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <Content Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

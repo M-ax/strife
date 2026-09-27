@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, writeFile, stat, readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -142,6 +142,28 @@ test('real PhotinoX, native voice engine and Helltube sign-in in one window', { 
     await page.reload();
     await page.waitForFunction(() => document.getElementById('engine-label').textContent === 'Voice engine ready');
     await frame.getByRole('button', { name: 'Your files', exact: true }).waitFor();
+    await t.test('Mumble import restarts voice and preserves Helltube', async () => {
+      const importDirectory = await mkdtemp(path.resolve('artifacts/mumble-import-test-'));
+      const importFile = path.join(importDirectory, 'mumble_settings.json');
+      const importContents = JSON.stringify({ settings_version: 1, audio: { transmit_mode: 'PTT', noise_cancel_mode: 'Off' } });
+      await writeFile(importFile, importContents);
+      await page.locator('#menu summary').click();
+      await page.locator('#import-mumble').click();
+      await page.waitForFunction(() => !document.getElementById('review-import').disabled);
+      await page.locator('#import-settings-source').fill(importFile);
+      await page.locator('#import-database-source').fill('');
+      await page.locator('#review-import').click();
+      await page.locator('#apply-import').waitFor();
+      assert.equal(await page.locator('#import-identity').isDisabled(), true);
+      assert.equal(await page.locator('#import-database').isDisabled(), true);
+      await page.locator('#apply-import').click();
+      await page.waitForFunction(() => !document.getElementById('import-dialog').open);
+      await page.getByText('RNNoise · disabled in settings').waitFor();
+      assert.match(await page.locator('#notice-text').textContent(), /Mumble import complete/);
+      assert.equal(await readFile(importFile, 'utf8'), importContents);
+      assert.equal(await page.locator('#helltube').getAttribute('src'), embeddedUrl);
+      await frame.getByRole('button', { name: 'Your files', exact: true }).waitFor();
+    });
     await page.screenshot({ path: 'artifacts/strife-desktop.png' });
     await page.locator('#menu summary').click();
     await page.getByRole('button', { name: 'Quit Strife' }).click();

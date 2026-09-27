@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 
 test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube isolation', async () => {
   const video = createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<h1>Helltube fixture</h1><input placeholder="Room name">'); });
-  const assets = new Map(['index.html', 'app.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
+  const assets = new Map(['index.html', 'app.js', 'chat.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
   const server = createServer(async (req, res) => {
     const file = assets.get(req.url);
     if (!file) { res.writeHead(404); res.end(); return; }
@@ -50,6 +50,26 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
               window.deliver({ type: 'preferences', value: prefs, videoUrl: prefs.helltubeUrl });
             }
             if (m.command === 'disconnect') { state.connected = false; window.deliver(state); }
+            if (m.command === 'importDiscover') {
+              window.deliver({ type: 'result', id: m.id, ok: true, sources: { settings: ['C:/Mumble/mumble_settings.json', 'registry'], databases: ['C:/Mumble/mumble.sqlite'] } }); return;
+            }
+            if (m.command === 'importPreview') {
+              if (m.settingsSource === 'invalid') {
+                window.deliver({ type: 'result', id: m.id, ok: false, error: 'Invalid Mumble settings file.' }); return;
+              }
+              window.deliver({ type: 'result', id: m.id, ok: true, preview: { id: 'reviewed-import', hasSettings: true, hasIdentity: true,
+                hasDatabase: true, serverCount: 1, databaseSource: 'C:/Mumble/mumble.sqlite' } }); return;
+            }
+            if (m.command === 'importApply') {
+              if (state.connected) { window.deliver({ type: 'result', id: m.id, ok: false, error: 'Disconnect from Mumble before importing.' }); return; }
+              localStorage.setItem('fixture-imported', 'true');
+              window.deliver({ type: 'result', id: m.id, ok: true, backup: 'C:/Strife/import-backups/test' }); return;
+            }
+            if (m.command === 'savedServers') {
+              window.deliver({ type: 'result', id: m.id, ok: true, servers: localStorage.getItem('fixture-imported') ? [
+                { id: 1, name: 'Friends <script>', host: 'imported.voice.test', port: 64740, username: 'ImportedUser', hasPassword: true }
+              ] : [] }); return;
+            }
             if (m.command === 'connect') {
               Object.assign(prefs, { mumbleHost: m.host.trim(), mumblePort: m.port, username: m.username.trim() });
               localStorage.setItem('fixture-preferences', JSON.stringify(prefs));
@@ -65,14 +85,68 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     await page.getByText('RNNoise · enabled').waitFor();
     await page.frameLocator('#helltube').getByRole('heading', { name: 'Helltube fixture' }).waitFor();
     assert.equal(await page.locator('.channel-user.talking').count(), 1);
+    assert.equal(await page.locator('#self-name').textContent(), 'Alice');
+    await page.evaluate(() => window.deliver({ type: 'state', connected: true, session: 7,
+      channels: [], users: [{ id: 7, name: 'Server display name', channel: 0 }] }));
+    assert.equal(await page.locator('#self-name').textContent(), 'Server display name');
+    assert.equal(await page.locator('#self-name').getAttribute('title'), 'Server display name');
+    await page.evaluate(() => window.deliver({ type: 'state', connected: false, channels: [], users: [] }));
+    assert.equal(await page.locator('#self-name').textContent(), 'Alice');
+    assert.equal(await page.locator('#self-avatar').textContent(), 'A');
+    assert.equal(await page.locator('#transmit-status').textContent(), 'Microphone offline');
+    await page.reload();
+    await page.getByText('RNNoise · enabled').waitFor();
+    await page.frameLocator('#helltube').getByRole('heading', { name: 'Helltube fixture' }).waitFor();
     const before = await page.locator('#helltube').boundingBox();
+    // Header controls share a 30px halo, even when the pointer is outside their panel.
+    const titleBounds = () => page.locator('#chat-pane .panel-handle').evaluate(handle => {
+      const range = document.createRange(); range.selectNodeContents(handle); return range.getBoundingClientRect().toJSON();
+    });
+    const title = await titleBounds(), header = await page.locator('#chat-pane .panel-header').boundingBox();
+    const checkHeaderFade = async (x, y, opacity) => {
+      await page.mouse.move(x, y);
+      await page.waitForFunction(expected => {
+        const button = document.querySelector('#chat-pane .panel-collapse:not([hidden])');
+        const grip = document.querySelector('#chat-pane .panel-handle');
+        return Math.abs(Number(getComputedStyle(button).opacity) - expected) < .02 &&
+          Math.abs(Number(getComputedStyle(grip, '::before').opacity) - expected) < .02;
+      }, opacity);
+    };
+    for (const distance of [45, 30, 25, 15, 5, 0]) {
+      await checkHeaderFade(header.x + header.width / 2, header.y + header.height + distance, Math.max(0, 1 - distance / 30));
+      assert.deepEqual(await titleBounds(), title, 'proximity does not move header text');
+    }
+    await checkHeaderFade(header.x + header.width / 2, header.y + 4, 1);
+    await checkHeaderFade(header.x + header.width / 2, header.y - 15, .5);
+    await checkHeaderFade(header.x - 15, header.y + header.height / 2, .5);
+    await checkHeaderFade(header.x - 12, header.y + header.height + 16, 1 / 3);
     await page.getByRole('button', { name: 'Collapse chat', exact: true }).click();
     const after = await page.locator('#helltube').boundingBox();
     assert.ok(after.width > before.width + 200);
+    const rail = await page.locator('#chat-pane .panel-header').boundingBox();
+    await checkHeaderFade(rail.x - 15, rail.y + rail.height / 2, .5);
+    await checkHeaderFade(rail.x + rail.width / 2, rail.y + rail.height / 2, 1);
     await page.getByRole('button', { name: 'Expand chat', exact: true }).click();
     await page.evaluate(() => window.deliver({ type: 'log', text: '<img src=x onerror="window.pwned=true"> unsafe server text' }));
     assert.equal(await page.locator('#chat-log img').count(), 0);
     assert.equal(await page.evaluate(() => window.pwned), undefined);
+    const chat = '😀 Docs\n\nVisit (https://example.com/Path_(one)?a=1&b=2).\n' +
+      '<img src=x onerror="window.pwned=true"> javascript:alert(1)';
+    await page.evaluate(text => window.deliver({ type: 'log', text, links: [
+      { start: 3, length: 4, href: 'https://docs.example.com/?a=1&b=2' }
+    ] }), chat);
+    assert.equal(await page.locator('#chat-log').textContent(), chat);
+    assert.equal(await page.locator('#chat-log a').count(), 2);
+    assert.equal(await page.locator('#chat-log img, #chat-log script').count(), 0);
+    const shellUrl = page.url();
+    await page.getByRole('link', { name: 'Docs', exact: true }).click();
+    await page.getByRole('link', { name: 'Docs', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await page.getByRole('link', { name: 'https://example.com/Path_(one)?a=1&b=2', exact: true }).click({ button: 'middle' });
+    const opened = await page.evaluate(() => window.commands.filter(m => m.command === 'openLink').map(m => m.url));
+    assert.deepEqual(opened, ['https://docs.example.com/?a=1&b=2', 'https://docs.example.com/?a=1&b=2',
+      'https://example.com/Path_(one)?a=1&b=2']);
+    assert.equal(page.url(), shellUrl, 'chat links leave the desktop shell in place');
     await page.getByRole('button', { name: '◈  Root', exact: true }).click();
     await page.getByLabel('Message your current voice channel').fill('hello room');
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -116,6 +190,7 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     await page.locator('#disconnect-button').click();
     await page.locator('#connect-button').click();
     assert.equal(await page.locator('#host').inputValue(), 'saved.voice.test');
+    assert.equal(await page.locator('#self-name').textContent(), 'SavedUser');
     assert.equal(await page.locator('#port').inputValue(), '64739');
     assert.equal(await page.locator('#username').inputValue(), 'SavedUser');
     assert.equal(await page.locator('#password').inputValue(), '');
@@ -150,7 +225,8 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
         const rooms = await box('rooms');
         await dragTo(id, { x: rooms.x + rooms.width / 2, y: side === 'top' ? rooms.y + 38 : rooms.y + rooms.height - 38 });
         const moved = await box(id), remaining = await box('rooms');
-        assert.ok(side === 'top' ? moved.y + moved.height < remaining.y : moved.y > remaining.y + remaining.height, id + ' ' + side + ' of rooms');
+        const gap = side === 'top' ? remaining.y - moved.y - moved.height : moved.y - remaining.y - remaining.height;
+        assert.ok(Math.abs(gap) < 1, id + ' directly ' + side + ' of rooms');
         assert.ok(Math.abs(moved.x - remaining.x) < 1);
       }
     }
@@ -225,6 +301,48 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     await page.waitForFunction(() => document.getElementById('engine-label').textContent === 'Voice engine ready');
     assert.ok((await box('rooms')).width > beforeResize.width, 'split sizes persist');
     await resetLayout();
+    // Import discovery, validation, review, cancellation, replacement and saved connections.
+    await page.locator('#menu summary').click();
+    await page.locator('#import-mumble').click();
+    await page.waitForFunction(() => !document.getElementById('review-import').disabled);
+    assert.equal(await page.locator('#import-settings-source').inputValue(), 'C:/Mumble/mumble_settings.json');
+    await page.locator('#import-settings-source').fill('invalid');
+    await page.locator('#review-import').click();
+    await page.getByText('Invalid Mumble settings file.', { exact: true }).waitFor();
+    assert.equal(await page.locator('#apply-import').isVisible(), false);
+    await page.locator('#import-settings-source').fill('registry');
+    await page.locator('#review-import').click();
+    await page.locator('#apply-import').waitFor();
+    assert.match(await page.locator('#import-summary').textContent(), /1 saved server/);
+    await page.locator('#apply-import').click();
+    await page.getByText('Disconnect from Mumble before importing.', { exact: true }).waitFor();
+    await page.locator('#import-dialog button.close-dialog').last().click();
+    await page.locator('#disconnect-button').click();
+    await page.locator('#connect-button').click();
+    await page.locator('#connect-import').click();
+    await page.locator('#review-import').click();
+    await page.locator('#import-identity').uncheck();
+    await page.locator('#apply-import').click();
+    await page.waitForFunction(() => !document.getElementById('import-dialog').open);
+    assert.match(await page.locator('#notice-text').textContent(), /Mumble import complete/);
+    const appliedImport = await page.evaluate(() => window.commands.filter(m => m.command === 'importApply').at(-1));
+    assert.equal(appliedImport.identity, false);
+    assert.equal(appliedImport.previewId, 'reviewed-import');
+    await page.locator('#connect-button').click();
+    await page.locator('#saved-server').selectOption('1');
+    assert.equal(await page.locator('#host').inputValue(), 'imported.voice.test');
+    assert.equal(await page.locator('#port').inputValue(), '64740');
+    assert.equal(await page.locator('#username').inputValue(), 'ImportedUser');
+    assert.equal(await page.locator('#password').inputValue(), '');
+    assert.equal(await page.locator('#password').getAttribute('placeholder'), 'Use imported password');
+    await page.locator('#host').fill('manual.test');
+    assert.equal(await page.locator('#saved-server').inputValue(), '');
+    await page.locator('#saved-server').selectOption('1');
+    await page.locator('#submit-connect').click();
+    await page.waitForFunction(() => !document.getElementById('connect-dialog').open);
+    const importedConnection = await page.evaluate(() => window.commands.filter(m => m.command === 'connect').at(-1));
+    assert.equal(importedConnection.savedServerId, 1);
+    assert.equal(importedConnection.password, '');
     await page.evaluate(() => window.deliver({ type: 'engine', ready: false, error: 'Fixture disconnect' }));
     assert.equal(await page.locator('#chat-message').isDisabled(), true);
     assert.equal(await page.locator('.channel-user').count(), 0);
