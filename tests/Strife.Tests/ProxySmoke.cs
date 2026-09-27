@@ -88,6 +88,10 @@ internal static class ProxySmoke
             var buffer = new byte[128];
             var result = await socket.ReceiveAsync(buffer.AsMemory(), context.RequestAborted);
             await socket.SendAsync(buffer.AsMemory(0, result.Count), result.MessageType, true, context.RequestAborted);
+            // Keep the fixture alive until the client has received the event.
+            // Disposing immediately after SendAsync can reset the transport
+            // before the proxy has delivered the buffered echo on macOS.
+            await socket.ReceiveAsync(buffer.AsMemory(), context.RequestAborted);
             await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "done", context.RequestAborted);
         });
         await upstream.StartAsync();
@@ -145,6 +149,7 @@ internal static class ProxySmoke
         var received = new byte[128];
         var count = await ws.ReceiveAsync(received.AsMemory(), timeout.Token);
         check(Encoding.UTF8.GetString(received, 0, count.Count) == "room event", "authenticated WebSocket room events pass through proxy");
+        await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "received", timeout.Token);
         ws.Abort();
         await upstream.StopAsync();
         await direct.StopAsync();
