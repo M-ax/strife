@@ -8,8 +8,6 @@ on:
   workflow_dispatch:
     inputs:
       version:
-  push:
-    branches: ['build/release-0.1.0-preview.2']
         description: 'Version to build (for example 0.1.0 or 0.2.0-rc.1); uploads workflow artifacts only'
         required: true
         type: string
