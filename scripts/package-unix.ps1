@@ -45,7 +45,15 @@ if ($IsMacOS) {
     # preserve .NET's app-local lookup paths without signing PE files as Mach-O.
     # https://developer.apple.com/library/archive/technotes/tn2206/_index.html
     foreach ($item in Get-ChildItem -LiteralPath (Join-Path $contents 'MacOS')) {
-        if (!$item.PSIsContainer -and ($item.Extension -eq '.dylib' -or $item.Name -in @('Strife', 'createdump'))) { continue }
+        if (!$item.PSIsContainer -and $item.Name -eq 'Strife') { continue }
+        if (!$item.PSIsContainer -and ($item.Extension -eq '.dylib' -or $item.Name -eq 'createdump')) {
+            # .NET resolves Strife.dll to Resources and searches for its runtime
+            # and native imports there. Keep native code in MacOS, linking back
+            # from the managed assembly's directory for self-contained lookup.
+            & ln -s "../MacOS/$($item.Name)" (Join-Path $contents "Resources/$($item.Name)")
+            if ($LASTEXITCODE) { throw "Cannot link native library: $($item.Name)" }
+            continue
+        }
         Move-Item -LiteralPath $item.FullName -Destination (Join-Path $contents "Resources/$($item.Name)")
         & ln -s "../Resources/$($item.Name)" $item.FullName
         if ($LASTEXITCODE) { throw "Cannot link resource: $($item.Name)" }
@@ -55,7 +63,7 @@ if ($IsMacOS) {
     # Ad-hoc signing preserves executable integrity on Apple Silicon. Developer
     # ID signing/notarization requires the publisher's Apple credentials.
     # Sign nested code first; signing the outer app also signs its main executable.
-    foreach ($binary in Get-ChildItem $contents -Recurse -File | Where-Object { $_.Extension -eq '.dylib' -or $_.Name -in @('createdump', 'Mumble') }) {
+    foreach ($binary in Get-ChildItem $contents -Recurse -File | Where-Object { !$_.LinkType -and ($_.Extension -eq '.dylib' -or $_.Name -in @('createdump', 'Mumble')) }) {
         & codesign --force --sign - $binary.FullName
         if ($LASTEXITCODE) { throw "Ad-hoc signing failed: $($binary.Name)" }
     }

@@ -28,8 +28,6 @@ jobs:
         include:
           - runtime: osx-arm64
             os: macos-15
-          - runtime: osx-x64
-            os: macos-15-intel
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     defaults:
