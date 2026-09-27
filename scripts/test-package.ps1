@@ -36,4 +36,32 @@ try {
     $arguments = @('run', '--project', (Join-Path $root 'tests/Strife.Tests'), '-c', 'Release', '--', '--voice-startup-only')
     if ($IsLinux) { & xvfb-run -a dotnet @arguments } else { & dotnet @arguments }
     if ($LASTEXITCODE) { throw 'Packaged voice startup failed.' }
+    if ($IsMacOS) {
+        # Exercise .NET's app-local lookup through the bundle's resource links,
+        # and load the real desktop shell after extracting the shipped ZIP.
+        $profile = Join-Path $stage 'desktop-profile'
+        $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $app 'Contents/MacOS/Strife'))
+        $start.UseShellExecute = $false
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $start.Environment['STRIFE_PROFILE'] = $profile
+        $desktop = [Diagnostics.Process]::Start($start)
+        $stdout = $desktop.StandardOutput.ReadToEndAsync()
+        $stderr = $desktop.StandardError.ReadToEndAsync()
+        try {
+            if ($desktop.WaitForExit(8000)) {
+                throw "Packaged desktop exited early: $($stderr.GetAwaiter().GetResult())"
+            }
+            $listeners = @(& lsof -nP -a -p $desktop.Id -iTCP -sTCP:LISTEN)
+            if ($LASTEXITCODE) { throw 'Packaged desktop did not open its local UI server.' }
+            $port = [regex]::Match(($listeners -join "`n"), '127\.0\.0\.1:(\d+)').Groups[1].Value
+            if (!$port) { throw 'Cannot locate the packaged desktop UI server.' }
+            $page = Invoke-WebRequest "http://127.0.0.1:$port/"
+            if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'Strife') { throw 'Packaged desktop assets failed to load.' }
+            Write-Host 'PASS: extracted macOS desktop launches and serves its UI assets'
+        } finally {
+            if (!$desktop.HasExited) { $desktop.Kill($true); $desktop.WaitForExit() }
+            $desktop.Dispose()
+        }
+    }
 } finally { $env:STRIFE_VOICE_ENGINE = $previousEngine }
