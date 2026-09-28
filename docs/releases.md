@@ -13,6 +13,13 @@ All four native builds must succeed before any assets are attached. Rerunning th
 
 The ZIP/tar archives include .NET, the voice engine, UI assets and dependency notices. The Windows portable ZIP needs WebView2 and the VC++ runtime already installed; the setup executable embeds both standalone redistributables for offline installation. Their Microsoft Authenticode signatures are verified during packaging. The installer checks runtime presence/version, reports prerequisite failures, handles restart requests, provides shortcuts and Apps & Features registration, removes obsolete runtime files on upgrade, rejects numeric version downgrades, and preserves profiles on uninstall.
 
+## Preview 0.1.0-preview.3
+
+- Channel names no longer have an added decorative prefix. Empty sibling rooms are hidden under a gray **x channels** control; expanding it reveals those rooms at the same indentation. Occupied descendant paths stay visible, and search reveals matching rooms and users through collapsed groups.
+- Incoming embedded chat images appear inline, fit the chat pane, and retain their link targets. Unsupported, unreadable, or oversized images display a placeholder. This includes the chat image fix that was previously available only in source builds.
+
+The platform requirements, prerequisite bundles, and signing status above are unchanged.
+
 ## Local builds
 
 Use PowerShell 7 on the target OS and architecture. Cross-publishing the managed shell alone does not produce a runnable voice package and is rejected by the script. Install the SDK specified by `global.json`, CMake, Git, Python 3, and a C++ compiler. Windows uses Visual Studio 2026 C++ tools and 7-Zip; Unix builds use Ninja. Windows packaging requires Inno Setup 6.3+, with CI pinned to 6.7.3.

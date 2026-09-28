@@ -4,6 +4,97 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
+async function checkChannelTree(page) {
+  const state = { type: 'state', connected: true, session: 7, rnnoise: true, transmitMode: 2,
+    channels: [
+      { id: 0, parent: -1, position: 0, name: 'Root' },
+      { id: 1, parent: 0, position: 0, name: '静かな部屋 🎵' },
+      { id: 4, parent: 0, position: 1, name: 'Lounge' },
+      { id: 2, parent: 0, position: 2, name: 'Games' },
+      { id: 9, parent: 0, position: 3, name: 'Spare' },
+      { id: 3, parent: 2, position: 0, name: 'Co-op' },
+      { id: 5, parent: 2, position: 1, name: 'Unplayed' },
+      { id: 10, parent: 9, position: 0, name: 'Reserve' }
+    ],
+    users: [{ id: 7, name: 'Alice', channel: 4 }, { id: 8, name: 'Bob', channel: 3 }]
+  };
+  const update = async changes => {
+    Object.assign(state, changes);
+    await page.evaluate(value => window.deliver(value), state);
+  };
+  const names = () => page.locator('#channel-tree .join').allTextContents();
+  const group = id => page.locator('[data-tree-focus="empty:' + id + '"]');
+  await update({});
+  assert.deepEqual(await names(), ['Root', 'Lounge', 'Games', 'Co-op']);
+  assert.equal(await group(0).textContent(), '2 channels');
+  assert.equal(await group(2).textContent(), '1 channel');
+  assert.equal(await group(0).getAttribute('aria-expanded'), 'false');
+  assert.equal(await group(0).evaluate(button => getComputedStyle(button).color), 'rgb(143, 146, 159)');
+  assert.equal(await page.locator('.channel-user').count(), 2, 'occupied descendant paths remain visible');
+
+  await group(0).focus(); await page.keyboard.press('Enter');
+  assert.deepEqual(await names(), ['Root', 'Lounge', 'Games', 'Co-op', '静かな部屋 🎵', 'Spare']);
+  assert.equal(await group(0).getAttribute('aria-expanded'), 'true');
+  assert.equal(await group(0).evaluate(button => button === document.activeElement), true);
+  const siblings = await group(0).evaluate(button => {
+    const summary = button.parentElement;
+    return [1, 9].map(id => {
+      const room = document.querySelector('[data-channel="' + id + '"]');
+      return { sameParent: room.parentElement.parentElement.parentElement === summary.parentElement,
+        indentation: room.parentElement.getBoundingClientRect().x - summary.getBoundingClientRect().x };
+    });
+  });
+  for (const sibling of siblings) {
+    assert.equal(sibling.sameParent, true, 'revealed rooms are siblings of the summary');
+    assert.equal(sibling.indentation, 0, 'the summary adds no indentation');
+  }
+  assert.equal(await group(9).textContent(), '1 channel', 'empty descendants stay compact');
+  await group(9).click();
+  await page.getByRole('button', { name: 'Reserve', exact: true }).click();
+  assert.ok(await page.evaluate(() => window.commands.some(m => m.command === 'join' && m.channel === 10)));
+  await update({ users: state.users.map(user => ({ ...user, talking: true })) });
+  assert.equal(await group(0).getAttribute('aria-expanded'), 'true', 'voice updates preserve expansion');
+  assert.ok((await names()).includes('Reserve'));
+  assert.equal(await page.locator('[data-channel="10"]').evaluate(button => button === document.activeElement), true);
+  await group(0).focus(); await page.keyboard.press('Space');
+  assert.equal(await group(0).getAttribute('aria-expanded'), 'false');
+  assert.deepEqual(await names(), ['Root', 'Lounge', 'Games', 'Co-op']);
+
+  // Search bypasses both manually folded channels and automatic empty groups.
+  await page.getByRole('button', { name: 'Collapse Games', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Find a channel' }).fill('Unplayed');
+  assert.deepEqual(await names(), ['Root', 'Games', 'Unplayed']);
+  assert.equal(await page.locator('.empty-channels-toggle').count(), 0);
+  await page.getByRole('searchbox', { name: 'Find a channel' }).fill('bob');
+  assert.deepEqual(await names(), ['Root', 'Games', 'Co-op']);
+  await page.getByRole('searchbox', { name: 'Find a channel' }).fill('静かな');
+  assert.deepEqual(await names(), ['Root', '静かな部屋 🎵']);
+  await page.getByRole('searchbox', { name: 'Find a channel' }).fill('');
+  assert.equal(await group(0).getAttribute('aria-expanded'), 'false');
+  await page.getByRole('button', { name: 'Expand Games', exact: true }).click();
+
+  // A newly occupied branch leaves the collapsed group immediately; leaving restores its count.
+  const originalUsers = state.users;
+  await update({ users: [...originalUsers, { id: 11, name: 'Carol', channel: 10 }] });
+  assert.deepEqual(await names(), ['Root', 'Lounge', 'Games', 'Co-op', 'Spare', 'Reserve']);
+  assert.equal(await group(0).textContent(), '1 channel');
+  await update({ users: originalUsers });
+  assert.equal(await group(0).textContent(), '2 channels');
+  assert.ok(!(await names()).includes('Spare'));
+
+  await update({ users: [{ id: 7, name: 'Alice', channel: 0 }] });
+  assert.deepEqual(await names(), ['Root']);
+  assert.equal(await group(0).textContent(), '4 channels', 'count siblings, not descendants');
+  await update({ users: [] });
+  assert.deepEqual(await names(), ['Root'], 'keep the root available when the whole server is empty');
+  await group(0).click();
+  assert.deepEqual(await names(), ['Root', '静かな部屋 🎵', 'Lounge', 'Games', 'Spare', 'Reserve']);
+  await update({ connected: false });
+  assert.deepEqual(await names(), []);
+  await update({ connected: true, users: originalUsers });
+  assert.equal(await group(0).getAttribute('aria-expanded'), 'false', 'another connection starts collapsed');
+}
+
 test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube isolation', async () => {
   const video = createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<h1>Helltube fixture</h1><input placeholder="Room name">'); });
   const assets = new Map(['index.html', 'app.js', 'chat.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
@@ -86,6 +177,7 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     await page.frameLocator('#helltube').getByRole('heading', { name: 'Helltube fixture' }).waitFor();
     assert.equal(await page.locator('.channel-user.talking').count(), 1);
     assert.equal(await page.locator('#self-name').textContent(), 'Alice');
+    await checkChannelTree(page);
     await page.evaluate(() => window.deliver({ type: 'state', connected: true, session: 7,
       channels: [], users: [{ id: 7, name: 'Server display name', channel: 0 }] }));
     assert.equal(await page.locator('#self-name').textContent(), 'Server display name');
@@ -187,7 +279,7 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     await page.waitForFunction(() => document.querySelectorAll('#chat-log img').length === 0);
     assert.equal(await page.locator('#chat-log').textContent(),
       'Missing [Image unavailable] remote [Image unavailable] broken [Image unavailable]');
-    await page.getByRole('button', { name: '◈  Root', exact: true }).click();
+    await page.getByRole('button', { name: 'Root', exact: true }).click();
     await page.getByLabel('Message your current voice channel').fill('hello room');
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await page.waitForFunction(() => document.getElementById('chat-message').value === '');

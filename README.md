@@ -38,7 +38,7 @@ See [release build instructions](docs/releases.md) for native dependencies, loca
 
 1. Choose **Connect to server** and enter a Mumble/Murmur hostname, port, username, and optional password. Vanilla servers need no plugins or modifications.
 2. Review unfamiliar server certificates in Mumble's native trust dialog. Certificate checks, client identities, and server authentication follow upstream Mumble.
-3. Choose a channel in the left tree. Speaking, mute, and deafen states update from the native client.
+3. Choose a channel in the left tree. Empty sibling rooms are grouped under a gray **x channels** control; expand it to show them at the same indentation. Rooms with users, including their parent channels, stay visible. Searching reveals matching rooms and users even in collapsed groups. Speaking, mute, and deafen states update from the native client.
 4. Open **Menu → Voice settings & shortcuts** to configure input/output devices, transmit mode, processing, encoding, positional audio, attenuation, notifications, or networking.
 5. For global push to talk, choose **Push To Talk** in **Audio Input**, then add a **Push-to-Talk** action in **Shortcuts** and record a keyboard, mouse, or supported controller binding. This uses Mumble's OS-level shortcut engine and works while another app or the embedded video has focus. As with standard Mumble, shortcuts into elevated apps may require matching privileges.
 6. Choose **Helltube → Server** and enter your existing server URL, then sign in inside the video pane. Run the supplied Helltube checkout using its existing instructions (npm start after npm run build, normally port 3000). Strife does not start or change production servers.

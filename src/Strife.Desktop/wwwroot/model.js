@@ -16,6 +16,7 @@ export function organizeChannels(channels, users, query = '') {
     return nodes.sort((a,b) => a.position - b.position || a.name.localeCompare(b.name)).filter(node => {
       node.children = sortAndFilter(node.children);
       node.users.sort((a,b) => a.name.localeCompare(b.name));
+      node.populated = node.users.length > 0 || node.children.some(child => child.populated);
       return !term || node.name.toLocaleLowerCase().includes(term) || node.children.length > 0 ||
         node.users.some(u => u.name.toLocaleLowerCase().includes(term));
     });

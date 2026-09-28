@@ -6,7 +6,7 @@ const $ = id => document.getElementById(id);
 // Keep the per-launch capability in this history entry so F5 can reattach.
 const token = location.hash.slice(1) || history.state?.strifeToken || '';
 history.replaceState({ strifeToken: token }, '', location.pathname);
-const pending = new Map(), folded = new Set();
+const pending = new Map(), folded = new Set(), expandedEmpty = new Set();
 let state = { connected: false, channels: [], users: [] };
 let preferences = {}, engineReady = false, currentVideo = '', lastLog = '', startPending = false;
 const native = window.external && typeof window.external.sendMessage === 'function';
@@ -43,6 +43,7 @@ function loadVideo(value) {
   $('video-address').textContent = new URL(preferences.helltubeUrl || url).host;
 }
 function showState(next) {
+  if (!next.connected) { folded.clear(); expandedEmpty.clear(); }
   state = next;
   const self = state.users.find(user => user.id === state.session);
   const channel = state.channels.find(channel => channel.id === self?.channel);
@@ -74,17 +75,41 @@ function showState(next) {
 function renderTree() {
   const tree = $('channel-tree'), fragment = document.createDocumentFragment();
   const self = state.users.find(user => user.id === state.session);
-  const active = document.activeElement?.dataset?.channel;
+  const query = $('channel-search').value.trim();
+  const active = document.activeElement?.dataset?.treeFocus;
+  function appendSiblings(nodes, parent, key) {
+    if (query) { nodes.forEach(node => append(node, parent)); return; }
+    const empty = [];
+    for (const node of nodes) {
+      if (node.populated) append(node, parent); else empty.push(node);
+    }
+    if (!empty.length) return;
+    const expanded = expandedEmpty.has(key);
+    const label = empty.length + (empty.length === 1 ? ' channel' : ' channels');
+    const row = document.createElement('div'); row.className = 'channel-row empty-channels';
+    row.setAttribute('role', 'treeitem'); row.setAttribute('aria-label', label);
+    const toggle = document.createElement('button'); toggle.className = 'empty-channels-toggle';
+    toggle.textContent = label; toggle.dataset.treeFocus = 'empty:' + key;
+    toggle.setAttribute('aria-label', (expanded ? 'Collapse ' : 'Expand ') + empty.length + (empty.length === 1 ? ' empty channel' : ' empty channels'));
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.onclick = () => { if (expanded) expandedEmpty.delete(key); else expandedEmpty.add(key); renderTree(); };
+    row.append(toggle); parent.append(row);
+    // The disclosure and its rooms are siblings; only real channel hierarchy adds indentation.
+    if (expanded) empty.forEach(node => append(node, parent));
+  }
   function append(node, parent) {
     const item = document.createElement('div'); item.setAttribute('role', 'treeitem'); item.setAttribute('aria-label', node.name);
     const row = document.createElement('div'); row.className = 'channel-row' + (node.id === self?.channel ? ' current' : '');
     const fold = document.createElement('button'); fold.className = 'fold';
-    const collapsed = folded.has(node.id) && !$('channel-search').value;
-    fold.textContent = collapsed ? '›' : '⌄'; fold.setAttribute('aria-label', (collapsed ? 'Expand ' : 'Collapse ') + node.name);
+    const collapsed = folded.has(node.id) && !query;
+    fold.dataset.treeFocus = 'fold:' + node.id;
+    fold.disabled = !node.children.length && !node.users.length;
+    fold.setAttribute('aria-label', (collapsed ? 'Expand ' : 'Collapse ') + node.name);
     fold.setAttribute('aria-expanded', String(!collapsed));
     fold.onclick = () => { if (folded.has(node.id)) folded.delete(node.id); else folded.add(node.id); renderTree(); };
     const join = document.createElement('button'); join.className = 'join'; join.dataset.channel = String(node.id);
-    join.textContent = '◈  ' + node.name; join.title = 'Join ' + node.name; join.disabled = !state.connected;
+    join.dataset.treeFocus = 'join:' + node.id;
+    join.textContent = node.name; join.title = 'Join ' + node.name; join.disabled = !state.connected;
     join.onclick = () => run('join', { channel: node.id }).catch(() => {});
     row.append(fold, join); item.append(row);
     if (!collapsed) {
@@ -97,13 +122,15 @@ function renderTree() {
         line.append(avatar, name, badge); item.append(line);
       }
       const children = document.createElement('div'); children.className = 'channel-group'; children.setAttribute('role', 'group');
-      node.children.forEach(child => append(child, children)); item.append(children);
+      appendSiblings(node.children, children, node.id); item.append(children);
     }
     parent.append(item);
   }
-  organizeChannels(state.connected ? state.channels : [], state.users, $('channel-search').value).forEach(node => append(node, fragment));
+  const roots = organizeChannels(state.connected ? state.channels : [], state.users, query);
+  // Keep the server's root visible even when everyone is offline.
+  if (roots.length === 1) append(roots[0], fragment); else appendSiblings(roots, fragment, 'root');
   tree.replaceChildren(fragment);
-  if (active) tree.querySelector('[data-channel="' + CSS.escape(active) + '"]')?.focus({ preventScroll: true });
+  if (active) tree.querySelector('[data-tree-focus="' + CSS.escape(active) + '"]')?.focus({ preventScroll: true });
   $('voice-empty').hidden = state.connected;
 }
 function receive(raw) {

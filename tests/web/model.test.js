@@ -18,6 +18,25 @@ test('search preserves ancestors and finds users', () => {
   assert.equal(tree[0].name, 'Root');
   assert.deepEqual(tree[0].children.map(c => c.id), [2]);
 });
+test('occupied descendants keep their entire path out of empty channel groups', () => {
+  const nested = [...channels,
+    { id: 3, parent: 1, position: 0, name: 'Co-op' },
+    { id: 4, parent: 1, position: 1, name: 'Quiet' }
+  ];
+  const users = [{ id: 8, name: 'Alice', channel: 3 }];
+  const [root] = organizeChannels(nested, users);
+  const [games, lounge] = root.children;
+  assert.equal(root.populated, true);
+  assert.equal(games.populated, true);
+  assert.equal(games.children[0].populated, true);
+  assert.equal(games.children[1].populated, false);
+  assert.equal(lounge.populated, false);
+  const [vacant] = organizeChannels(nested, []);
+  assert.equal(vacant.populated, false, 'occupancy is recalculated when users leave');
+  assert.equal(vacant.children[0].populated, false);
+  assert.equal(nested[0].populated, undefined, 'native state is not mutated');
+});
+
 test('missing parents and malicious cycles cannot hang the renderer', () => {
   const tree = organizeChannels([
     { id: 1, parent: 2, name: 'A', position: 0 }, { id: 2, parent: 1, name: 'B', position: 0 },
