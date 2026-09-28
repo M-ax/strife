@@ -22,7 +22,7 @@ The platform requirements, prerequisite bundles, and signing status above are un
 
 ## Local builds
 
-Use PowerShell 7 on the target OS and architecture. Cross-publishing the managed shell alone does not produce a runnable voice package and is rejected by the script. Install the SDK specified by `global.json`, CMake, Git, Python 3, and a C++ compiler. Windows uses Visual Studio 2026 C++ tools and 7-Zip; Unix builds use Ninja. Windows packaging requires Inno Setup 6.3+, with CI pinned to 6.7.3.
+Use PowerShell 7 on the target OS and architecture. Cross-publishing the managed shell alone does not produce a runnable voice package and is rejected by the script. Install the SDK specified by `global.json`, CMake, Git, Python 3, and a C++ compiler. Windows uses Visual Studio 2026 C++ tools and 7-Zip; Unix builds use Ninja. Windows packaging requires Inno Setup 6.3+, with CI downloading 6.7.3 from its official GitHub release and verifying its pinned SHA-256 before installation.
 
 ```powershell
 # Choose win-x64, linux-x64, osx-x64 or osx-arm64 for this machine.

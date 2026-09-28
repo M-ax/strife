@@ -72,8 +72,13 @@ jobs:
       - name: Install Windows packaging tools
         if: runner.os == 'Windows'
         run: |
-          choco install innosetup --version=6.7.3 --yes --no-progress
-          if ($LASTEXITCODE) { throw 'Inno Setup installation failed.' }
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $installer
+          if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732') {
+            throw 'Inno Setup checksum mismatch.'
+          }
+          $setup = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -WindowStyle Hidden -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Inno Setup installation failed: $($setup.ExitCode)" }
       - uses: actions/cache@v5
         with:
           path: artifacts/build-env
