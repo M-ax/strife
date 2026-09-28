@@ -31,6 +31,13 @@ internal static class NativeSmoke
         await File.WriteAllTextAsync(Path.Combine(directory, "server.key"), rsa.ExportRSAPrivateKeyPem());
         string Q(string file) => Path.Combine(directory, file).Replace('\\', '/');
         var ini = Path.Combine(directory, "server.ini");
+        var raster = Convert.ToBase64String(await File.ReadAllBytesAsync(Path.Combine(root, "src", "Strife.Desktop", "wwwroot", "assets", "strife.png")));
+        // Match Mumble's percent-escaped, line-wrapped attachment encoding.
+        var encodedRaster = string.Join("&#10;", Enumerable.Range(0, (raster.Length + 71) / 72)
+            .Select(i => Uri.EscapeDataString(raster.Substring(i * 72, Math.Min(72, raster.Length - i * 72)))));
+        var rasterTag = "<img width=\\\"1\\\" height=\\\"1\\\" src=\\\"data:image/PNG;base64," + encodedRaster + "\\\" />";
+        var imageHistory = string.Concat(Enumerable.Repeat(rasterTag, 45));
+        const string gif = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
         await File.WriteAllTextAsync(ini, $"""
             host=127.0.0.1
             port={port}
@@ -38,7 +45,7 @@ internal static class NativeSmoke
             logfile={Q("server.log")}
             sslCert={Q("server.pem")}
             sslKey={Q("server.key")}
-            welcometext="Strife integration test 😀 <a href=\"https://example.com/docs?a=1&amp;b=2\">Named guide</a><br/>Second line<br/><br/>After blank line"
+            welcometext="Strife integration test 😀 <a href=\"https://example.com/docs?a=1&amp;b=2\">Named guide</a><br/>Second line<br/><br/>After blank line<br/>Older images: {imageHistory}<br/>Inline 😀 <a href=\"https://example.com/photo\">{rasterTag}</a> after image <img src=\"{gif}\" alt=\"Tiny image\" /><img src=\"https://example.invalid/private.png\" />"
             registerName=Strife local test
             """);
         var start = new ProcessStartInfo(serverPath) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = directory };
@@ -81,8 +88,16 @@ internal static class NativeSmoke
             await ImportTests.Native(directory, aliceProfile, alice, check);
             await alice.SendAsync(new { command = "connect", id = "connect-a", url = PreferencesStore.MumbleUrl("127.0.0.1", port, "StrifeAlice", "") });
             await bob.SendAsync(new { command = "connect", id = "connect-b", url = PreferencesStore.MumbleUrl("127.0.0.1", port, "StrifeBob", "") });
-            await Until(() => Task.FromResult(alice.LastState?.GetProperty("users").GetArrayLength() == 2 &&
-                bob.LastState?.GetProperty("users").GetArrayLength() == 2), "two-client vanilla Murmur connection");
+            try
+            {
+                await Until(() => Task.FromResult(alice.LastState?.GetProperty("users").GetArrayLength() == 2 &&
+                    bob.LastState?.GetProperty("users").GetArrayLength() == 2), "two-client vanilla Murmur connection");
+            }
+            catch (TimeoutException error)
+            {
+                throw new Exception($"{error.Message}. Alice: {alice.Failure}, {alice.LastState}, {alice.LastLog?.GetProperty("text")}; " +
+                    $"Bob: {bob.Failure}, {bob.LastState}, {bob.LastLog?.GetProperty("text")}", error);
+            }
             check(alice.LastState!.Value.GetProperty("connected").GetBoolean(), "TLS connection to vanilla Murmur");
             try { await alice.EnsureImportReadyAsync(); throw new Exception("Import allowed during a connection"); }
             catch (ArgumentException) { check(true, "native import is rejected while connected"); }
@@ -103,6 +118,23 @@ internal static class NativeSmoke
                 link.GetProperty("href").GetString() == "https://example.com/docs?a=1&b=2" &&
                 logText.Substring(link.GetProperty("start").GetInt32(), link.GetProperty("length").GetInt32()) == "Named guide"),
                 "native named links preserve their targets and UTF-16 text offsets");
+            var images = log.GetProperty("images").EnumerateArray().ToArray();
+            var inlineStart = logText.IndexOf("Inline 😀 ", StringComparison.Ordinal) + "Inline 😀 ".Length;
+            var photo = images.Single(image => image.GetProperty("start").GetInt32() == inlineStart);
+            check(photo.GetProperty("src").GetString() == "data:image/png;base64," + raster &&
+                photo.GetProperty("width").GetInt32() > 1 && photo.GetProperty("height").GetInt32() > 1,
+                "native images normalize Mumble's escaped data and include intrinsic dimensions");
+            check(log.GetProperty("links").EnumerateArray().Any(link =>
+                link.GetProperty("href").GetString() == "https://example.com/photo" &&
+                link.GetProperty("start").GetInt32() == inlineStart && link.GetProperty("length").GetInt32() == 1),
+                "linked images preserve their target and UTF-16 position");
+            check(images.Last().GetProperty("src").GetString() == gif &&
+                images.Last().GetProperty("alt").GetString() == "Tiny image" &&
+                images.All(image => logText[image.GetProperty("start").GetInt32()] == '\ufffc'),
+                "raster attachments retain their positions and alt text while remote images are excluded");
+            check(images.Length > 2 && images.Length < 47 &&
+                !images.Any(image => image.GetProperty("start").GetInt32() == logText.IndexOf('\ufffc')),
+                "image history retains the latest attachments within the IPC frame budget");
             foreach (var target in new[] { "javascript:alert(1)", "file:///C:/Windows", "data:text/html,test",
                 "qrc:/test", "clientid://id.1/test", "channelid://id.1/test", "//example.com", "relative" })
             {
@@ -129,6 +161,8 @@ internal static class NativeSmoke
             check(restored.GetProperty("connected").GetBoolean() && restored.GetProperty("session").GetInt32() == session &&
                 restored.GetProperty("deafened").GetBoolean() && restored.GetProperty("users").GetArrayLength() == 2,
                 "refreshed UI receives the existing Mumble session and current controls without reconnecting");
+            check(snapshots.Single(m => m.GetProperty("type").GetString() == "log").GetProperty("images").GetArrayLength() > 0,
+                "refreshed UI receives cached chat attachments");
             await alice.SendAsync(new { command = "join", id = "join-invalid", channel = 999999 });
             await Until(() => Task.FromResult(aliceMessages.Any(m => m.GetProperty("type").GetString() == "result" &&
                 m.GetProperty("id").GetString() == "join-invalid" && !m.GetProperty("ok").GetBoolean())), "invalid channel rejection");

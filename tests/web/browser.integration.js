@@ -147,6 +147,46 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     assert.deepEqual(opened, ['https://docs.example.com/?a=1&b=2', 'https://docs.example.com/?a=1&b=2',
       'https://example.com/Path_(one)?a=1&b=2']);
     assert.equal(page.url(), shellUrl, 'chat links leave the desktop shell in place');
+    await page.evaluate(() => {
+      const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 800;
+      const context = canvas.getContext('2d'); context.fillStyle = '#cc88ff'; context.fillRect(0, 0, 1200, 800);
+      const text = '\n'.repeat(80) + '😀 Before \ufffc after \ufffc';
+      const first = text.indexOf('\ufffc');
+      window.imageLog = { type: 'log', text, links: [{ start: first, length: 1, href: 'https://example.com/photo' }],
+        images: [first, text.lastIndexOf('\ufffc')].map(start => ({ start, src: canvas.toDataURL(),
+          width: 1200, height: 800, alt: '<img onerror="window.pwned=true">' })) };
+      window.deliver(window.imageLog);
+    });
+    await page.waitForFunction(() => [...document.querySelectorAll('#chat-log img')].length === 2 &&
+      [...document.querySelectorAll('#chat-log img')].every(image => image.complete && image.naturalWidth === 1200));
+    const imageLayout = await page.locator('#chat-log').evaluate(log => {
+      const images = [...log.querySelectorAll('img')].map(image => image.getBoundingClientRect().toJSON());
+      return { images, width: log.clientWidth, overflow: log.scrollWidth - log.clientWidth,
+        bottom: log.scrollHeight - log.scrollTop - log.clientHeight };
+    });
+    for (const bounds of imageLayout.images) {
+      assert.ok(bounds.width > 0 && bounds.width <= imageLayout.width, 'attachments fit the pane');
+      assert.ok(Math.abs(bounds.width / bounds.height - 1.5) < .01, 'attachments keep their aspect ratio');
+    }
+    assert.ok(imageLayout.overflow <= 1);
+    assert.ok(imageLayout.bottom <= 1, 'image dimensions keep new messages scrolled into view');
+    assert.equal(await page.evaluate(() => window.pwned), undefined);
+    await page.locator('#chat-log a img').click();
+    assert.equal(await page.evaluate(() => window.commands.filter(m => m.command === 'openLink').at(-1).url),
+      'https://example.com/photo');
+    await page.evaluate(() => {
+      document.getElementById('chat-log').scrollTop = 0;
+      window.deliver({ ...window.imageLog, text: window.imageLog.text + '\nNext message' });
+    });
+    await page.waitForFunction(() => [...document.querySelectorAll('#chat-log img')].every(image => image.complete));
+    assert.equal(await page.locator('#chat-log').evaluate(log => log.scrollTop), 0, 'reading older messages preserves scroll position');
+    await page.evaluate(() => window.deliver({ type: 'log', text: 'Missing \ufffc remote \ufffc broken \ufffc', images: [
+      { start: 17, src: 'https://example.com/private.png' },
+      { start: 26, src: 'data:image/png;base64,AAAA' }
+    ] }));
+    await page.waitForFunction(() => document.querySelectorAll('#chat-log img').length === 0);
+    assert.equal(await page.locator('#chat-log').textContent(),
+      'Missing [Image unavailable] remote [Image unavailable] broken [Image unavailable]');
     await page.getByRole('button', { name: '◈  Root', exact: true }).click();
     await page.getByLabel('Message your current voice channel').fill('hello room');
     await page.getByRole('button', { name: 'Send message', exact: true }).click();

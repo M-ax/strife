@@ -129,7 +129,7 @@ function receive(raw) {
   else if (message.type === 'log') {
     if (workspace.isCollapsed('chat') && lastLog && lastLog !== message.text) $('unread-dot').hidden = false;
     const log = $('chat-log'), nearBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 50;
-    lastLog = message.text; renderChat(log, message.text, message.links);
+    lastLog = message.text; renderChat(log, message.text, message.links, message.images);
     if (nearBottom) log.scrollTop = log.scrollHeight;
   }
 }

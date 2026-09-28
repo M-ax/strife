@@ -29,6 +29,7 @@ dialog{border:1px solid #47414f;border-radius:14px;background:#222129;color:#e5e
 .identity>div{min-width:0}.identity strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chat-content{overflow:hidden}.chat-intro{flex-shrink:0}#chat-log{min-height:30px}#chat-form{flex-shrink:0}
 #chat-log a{color:#c7b5ff;text-decoration:underline;text-underline-offset:2px}#chat-log a:hover{color:#e0d5ff}#chat-log a:focus-visible{outline:2px solid #b4a4ff;outline-offset:2px}
+#chat-log img{max-width:100%;height:auto;vertical-align:middle;border-radius:4px}
 .is-compact .chat-intro{padding-top:9px}.is-compact .chat-intro .eyebrow,.is-compact .chat-intro p{display:none}
 .is-compact .chat-intro h2{margin:0 0 6px;font-size:14px}
 .is-compact .rooms-content{padding-top:10px}.is-compact .rooms-content .voice-empty{display:none}

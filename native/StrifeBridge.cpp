@@ -22,6 +22,9 @@
 #include <QTextDocument>
 #include <QTextBlock>
 #include <QTextFragment>
+#include <QBuffer>
+#include <QImageReader>
+#include <QRegularExpression>
 #include <QFile>
 #include <QSettings>
 #ifdef Q_OS_WIN
@@ -40,11 +43,40 @@ void MainWindow::setVisible(bool visible) {
 
 namespace {
 constexpr int MaxFrame = 1024 * 1024;
+
+QJsonObject chatImage(const QTextImageFormat &format) {
+    // Mumble embeds images as data URLs, with percent-escaped base64 and line
+    // breaks. Export only raster data, never URLs that can fetch external files.
+    const auto name = format.name();
+    if (name.size() > MaxFrame) return {};
+    auto source = QUrl::fromPercentEncoding(name.toUtf8());
+    source.remove(QRegularExpression(QStringLiteral("\\s")));
+    static const QRegularExpression raster(QStringLiteral(
+        "^data:image/(png|jpe?g|gif|webp|bmp);base64,([A-Za-z0-9+/]+={0,2})$"),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto match = raster.match(source);
+    if (!match.hasMatch() || source.size() > 512 * 1024) return {};
+    auto bytes = QByteArray::fromBase64(match.captured(2).toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::ReadOnly);
+    QImageReader reader(&buffer);
+    const auto type = reader.format();
+    if (type != "png" && type != "jpeg" && type != "gif" && type != "webp" && type != "bmp") return {};
+    const auto size = reader.size();
+    if (!size.isValid() || size.isEmpty() || size.width() > 8192 || size.height() > 8192
+        || qint64(size.width()) * size.height() > 16 * 1024 * 1024) return {};
+    return {{QStringLiteral("src"), QStringLiteral("data:image/%1;base64,%2")
+                .arg(QString::fromLatin1(type), QString::fromLatin1(bytes.toBase64()))},
+        {QStringLiteral("width"), size.width()}, {QStringLiteral("height"), size.height()},
+        {QStringLiteral("alt"), format.stringProperty(QTextFormat::ImageAltText).left(200)}};
+}
+
 class StrifeBridge final : public QObject {
     QLocalSocket socket;
     QTimer timer;
     QByteArray pending, previous;
     bool authenticated = false;
+    bool logChanged = false;
     bool dialogOpen = false;
 
     void foregroundDialog(QWidget *dialog) {
@@ -95,6 +127,7 @@ class StrifeBridge final : public QObject {
         // toPlainText() exposes those separators and discards the link targets.
         QString text;
         QJsonArray links;
+        QList<QPair<qsizetype, QTextImageFormat>> images;
         bool firstBlock = true;
         auto *document = Global::get().mw->qteLog->document();
         for (auto block = document->begin(); block.isValid(); block = block.next()) {
@@ -113,6 +146,12 @@ class StrifeBridge final : public QObject {
                 text += fragment.text().replace(QChar::LineSeparator, QLatin1Char('\n'))
                     .replace(QChar::ParagraphSeparator, QLatin1Char('\n'))
                     .replace(QChar::Nbsp, QLatin1Char(' '));
+                if (fragment.charFormat().isImageFormat()) {
+                    for (auto position = start; position < text.size(); ++position) {
+                        if (text.at(position) == QChar::ObjectReplacementCharacter)
+                            images.append({position, fragment.charFormat().toImageFormat()});
+                    }
+                }
                 if (!href.isEmpty()) {
                     links.append(QJsonObject{{QStringLiteral("start"), start},
                         {QStringLiteral("length"), text.size() - start}, {QStringLiteral("href"), href}});
@@ -131,10 +170,26 @@ class StrifeBridge final : public QObject {
             retainedLinks.append(link);
         }
         QJsonObject message{{QStringLiteral("type"), QStringLiteral("log")},
-            {QStringLiteral("text"), text.mid(removed)}, {QStringLiteral("links"), retainedLinks}};
+            {QStringLiteral("text"), text.mid(removed)}, {QStringLiteral("links"), retainedLinks},
+            {QStringLiteral("images"), QJsonArray()}};
         // Keep even pathological rich-text logs within the existing IPC bound.
         if (QJsonDocument(message).toJson(QJsonDocument::Compact).size() >= MaxFrame)
             message.remove(QStringLiteral("links"));
+        // Keep the latest attachments that fit in the same bounded log frame.
+        // Omitted images retain their placeholder and get a readable fallback.
+        auto remaining = MaxFrame - 1 - QJsonDocument(message).toJson(QJsonDocument::Compact).size();
+        QJsonArray retainedImages;
+        for (auto it = images.crbegin(); it != images.crend(); ++it) {
+            if (it->first < removed) break;
+            auto image = chatImage(it->second);
+            if (image.isEmpty()) continue;
+            image[QStringLiteral("start")] = it->first - removed;
+            const auto cost = QJsonDocument(image).toJson(QJsonDocument::Compact).size() + 1;
+            if (cost > remaining) continue;
+            remaining -= cost;
+            retainedImages.prepend(image);
+        }
+        message[QStringLiteral("images")] = retainedImages;
         send(message);
     }
     void snapshot() {
@@ -313,9 +368,14 @@ public:
                 } else command(doc.object());
             }
         });
-        connect(&timer, &QTimer::timeout, this, [this]() { snapshot(); });
+        connect(&timer, &QTimer::timeout, this, [this]() {
+            snapshot();
+            if (logChanged) { logChanged = false; sendLog(); }
+        });
         connect(Global::get().mw->qteLog->document(), &QTextDocument::contentsChanged, this, [this]() {
-            if (authenticated) sendLog();
+            // A single message triggers several document edits. Publish its
+            // completed layout once so images cannot flood the output queue.
+            if (authenticated) logChanged = true;
         });
         socket.connectToServer(qEnvironmentVariable("STRIFE_PIPE"));
         QTimer::singleShot(15000, this, [this]() { if (!authenticated) qApp->quit(); });
