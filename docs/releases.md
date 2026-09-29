@@ -57,7 +57,11 @@ sudo apt-get install ninja-build pkg-config libasound2-dev libsm-dev \
   libgtk-3-0 libwebkit2gtk-4.1-0 libnotify4 xvfb xauth
 ```
 
-Linux users need the runtime libraries, not the compiler/development packages. For Ubuntu 24.04:
+Linux users need the runtime libraries, not the compiler/development packages.
+
+The Linux archive is also used on current Arch Linux, Rocky Linux 10 with EPEL/CRB, and current Void Linux **glibc**, all x86_64. Distribution package managers install the host libraries; separate `.deb`, `.rpm`, pacman, and XBPS archives are not required. The published native payload requires glibc 2.38 or newer, so Rocky 8/9 and Void musl are not compatible with this archive. Repackaging the same binaries does not remove that requirement. See the [website's distro-specific commands](https://strife.zip/wiki/#linux-client). Rocky 10 uses Xwayland for the bundled Qt voice engine. Keep the compiled Mumble payload unchanged when adding documentation for compatible distributions.
+
+For Ubuntu 24.04:
 
 ```sh
 sudo apt-get install libgtk-3-0 libwebkit2gtk-4.1-0 libnotify4 libasound2t64 \

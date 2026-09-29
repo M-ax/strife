@@ -30,7 +30,7 @@ The setup executable and portable ZIP are written to `artifacts/release`. Setup 
 
 Publishing a GitHub release with a version tag such as `v0.1.0` starts the **Publish** workflow. It builds Windows x64, Linux x64, macOS Intel, and macOS Apple Silicon on native runners. Once every build and packaging check passes, it attaches the Windows installer/portable ZIP, Linux tarball, macOS app ZIPs, and `SHA256SUMS.txt` to that release. **Run workflow** builds a supplied version as downloadable workflow artifacts without creating a release.
 
-On macOS, extract the ZIP and move `Strife.app` to Applications (macOS 14 or newer). The app is ad-hoc signed, not Developer ID signed or notarized. On Linux, extract the tarball and run `Strife/Strife`; the build targets Ubuntu 24.04 x64 and requires GTK 3, WebKitGTK 4.1, and the system audio/X11 libraries. Neither platform requires a separately installed .NET runtime or Mumble.
+On macOS, extract the ZIP and move `Strife.app` to Applications (macOS 14 or newer). The app is ad-hoc signed, not Developer ID signed or notarized. On Linux, extract the tarball and run `Strife/Strife`; the build targets Ubuntu 24.04 x64 and requires GTK 3, WebKitGTK 4.1, and the system audio/X11 libraries. The same archive also runs on current Arch, Rocky 10 with EPEL/CRB, and Void glibc x86_64; see the [distro-specific dependency instructions](https://strife.zip/wiki/#linux-client). It requires glibc 2.38 or newer and does not support Rocky 8/9 or Void musl. Neither platform requires a separately installed .NET runtime or Mumble.
 
 See [release build instructions](docs/releases.md) for native dependencies, local builds, runtime packages, signing, and validation.
 
