@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chatParts, chatUrl, chatImageUrl } from '../../src/Strife.Desktop/wwwroot/chat.js';
+import { chatParts, chatUrl, chatImageUrl, chatMessages } from '../../src/Strife.Desktop/wwwroot/chat.js';
 
 test('chat URLs preserve text, whitespace, query strings, Unicode and balanced punctuation', () => {
   const text = 'See (https://example.com/Path_(one)?a=1&b=2#part),\n\nwww.example.com/test. ' +
@@ -55,6 +55,35 @@ test('malformed native link ranges never duplicate or discard log text', () => {
 });
 
 const imageSrc = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+test('Mumble messages style timestamps and native user references without losing multiline content', () => {
+  const text = '[Date changed to 2026-09-28]\n[14:32:08] (Channel) 雪😀: First line\n\nSecond line\n' +
+    '[02:33:10 PM] (Private) Bob: Photo \ufffc and Guide\n[14:34:00] Connected.';
+  const messages = chatMessages(text, [
+    { start: text.indexOf('雪'), length: 3, href: 'clientid://id.1/test' },
+    { start: text.indexOf('Bob'), length: 3, href: 'clientid://id.2/test' },
+    { start: text.indexOf('Guide'), length: 5, href: 'https://example.com/' }
+  ], [{ start: text.indexOf('\ufffc'), src: imageSrc }]);
+  assert.equal(messages.length, 4);
+  assert.equal(messages.flat().map(part => part.text).join(''), text);
+  assert.deepEqual(messages.flat().filter(part => part.kind === 'timestamp').map(part => part.text),
+    ['[14:32:08]', '[02:33:10 PM]', '[14:34:00]']);
+  const names = messages.flat().filter(part => part.kind === 'username');
+  assert.deepEqual(names.map(part => part.text), ['雪😀', 'Bob']);
+  assert.ok(names.every(part => !part.href), 'native user links remain inert');
+  assert.match(messages[1].map(part => part.text).join(''), /First line\n\nSecond line\n$/);
+  assert.equal(messages[2].find(part => part.image).image.src, imageSrc);
+  assert.equal(messages[2].find(part => part.href).href, 'https://example.com/');
+});
+
+test('truncated history, unframed text and invalid timestamps retain their original text', () => {
+  for (const text of ['', 'truncated\n[14:00:00] New entry', '[99:99:99] plain\n[14:00:00]body',
+    '[14:00:00] Message mentions [15:00:00] inline\ncontinuation']) {
+    assert.equal(chatMessages(text).flat().map(part => part.text).join(''), text);
+  }
+  assert.equal(chatMessages('[99:99:99] plain\n[14:00:00]body').length, 1);
+  assert.equal(chatMessages('[14:00:00] one\n[14:00:00] two').length, 2);
+});
 
 test('inline images preserve UTF-16 positions, surrounding text, and link targets', () => {
   const text = '😀 photo \ufffc\ufffc then https://example.com/\ufffc end';

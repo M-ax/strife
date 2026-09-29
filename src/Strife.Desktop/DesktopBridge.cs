@@ -52,6 +52,8 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
                 Send(new { type = "engine", ready = true });
                 Send(new { type = "result", id, ok = true });
             }
+            else if (command == "fonts")
+                Send(new { type = "result", id, ok = true, batch = SystemFontCatalog.Shared.Read(message["offset"]?.GetValue<int>() ?? 0) });
             else if (command == "preferences")
             {
                 var url = message["helltubeUrl"]?.GetValue<string>() ?? preferences.Current.HelltubeUrl;
@@ -63,7 +65,11 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
                         ? layout is JsonObject && layout.ToJsonString().Length <= 8192
                             ? JsonSerializer.SerializeToElement(layout)
                             : throw new ArgumentException("Invalid workspace layout.")
-                        : preferences.Current.WorkspaceLayout
+                        : preferences.Current.WorkspaceLayout,
+                    Appearance = message["appearance"] is { } appearance
+                        ? appearance.Deserialize<AppearancePreferences>(PreferencesStore.Json)
+                            ?? throw new ArgumentException("Invalid appearance settings.")
+                        : preferences.Current.Appearance
                 });
                 Send(new { type = "preferences", value = preferences.Current,
                     videoUrl = loadVideo is null ? preferences.Current.HelltubeUrl : await loadVideo(preferences.Current.HelltubeUrl) });

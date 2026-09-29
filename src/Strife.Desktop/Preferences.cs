@@ -4,7 +4,24 @@ namespace Strife;
 
 public sealed record Preferences(string HelltubeUrl = "http://127.0.0.1:3000",
     string MumbleHost = "", int MumblePort = 64738, string Username = "", bool ChatCollapsed = false,
-    JsonElement? WorkspaceLayout = null);
+    JsonElement? WorkspaceLayout = null, AppearancePreferences? Appearance = null);
+
+public sealed record AppearancePreferences(string AccentColor = "#00e0bb", string TimestampColor = "#8fa9bf",
+    string UsernameColor = "#e8b87e", string LinkColor = "#c7b5ff", string ChatFont = "system", string UiFont = "system")
+{
+    public static bool IsLocalFont(string? value) => value is not null && value.StartsWith("local:", StringComparison.Ordinal)
+        && value.Length is > 6 and <= 262 && !string.IsNullOrWhiteSpace(value[6..]) && !value.Any(char.IsControl);
+
+    public void Validate()
+    {
+        foreach (var color in new[] { AccentColor, TimestampColor, UsernameColor, LinkColor })
+            if (color is null || color.Length != 7 || color[0] != '#' || !color.Skip(1).All(char.IsAsciiHexDigit))
+                throw new ArgumentException("Choose a valid appearance color.");
+        string[] fonts = ["system", "sans", "verdana", "trebuchet", "serif", "mono", "courier"];
+        if ((!fonts.Contains(ChatFont) && !IsLocalFont(ChatFont)) || (!fonts.Contains(UiFont) && !IsLocalFont(UiFont)))
+            throw new ArgumentException("Choose a font from the appearance settings.");
+    }
+}
 
 public sealed class PreferencesStore(string directory)
 {
@@ -21,6 +38,9 @@ public sealed class PreferencesStore(string directory)
         {
             var value = JsonSerializer.Deserialize<Preferences>(File.ReadAllText(path), Json) ?? new();
             ValidateHelltubeUrl(value.HelltubeUrl);
+            // An invalid appearance must not discard connection or layout settings.
+            try { value.Appearance?.Validate(); }
+            catch (ArgumentException) { value = value with { Appearance = null }; }
             Current = value;
         }
         catch (Exception e) when (e is JsonException or ArgumentException) { Current = new(); }
@@ -29,6 +49,7 @@ public sealed class PreferencesStore(string directory)
     public void Save(Preferences value)
     {
         ValidateHelltubeUrl(value.HelltubeUrl);
+        value.Appearance?.Validate();
         Directory.CreateDirectory(DirectoryPath);
         var temporary = path + ".tmp";
         File.WriteAllText(temporary, JsonSerializer.Serialize(value, Json));

@@ -1,6 +1,7 @@
 import { organizeChannels, validateVideoUrl } from './model.js';
 import { createWorkspace } from './layout.js';
 import { renderChat } from './chat.js';
+import { createAppearanceSettings } from './appearance.js';
 
 const $ = id => document.getElementById(id);
 // Keep the per-launch capability in this history entry so F5 can reattach.
@@ -10,6 +11,14 @@ const pending = new Map(), folded = new Set(), expandedEmpty = new Set();
 let state = { connected: false, channels: [], users: [] };
 let preferences = {}, engineReady = false, currentVideo = '', lastLog = '', startPending = false;
 const native = window.external && typeof window.external.sendMessage === 'function';
+const appearance = createAppearanceSettings(async value => {
+  if (native) await request('preferences', { appearance: value });
+  else localStorage.setItem('strife-appearance', JSON.stringify(value));
+}, native ? async offset => (await request('fonts', { offset })).batch : null);
+appearance.restore();
+if (!native) {
+  try { appearance.restore(JSON.parse(localStorage.getItem('strife-appearance'))); } catch {}
+}
 
 function notice(text) { $('notice-text').textContent = text; $('notice').hidden = false; }
 function request(command, data = {}) {
@@ -141,6 +150,7 @@ function receive(raw) {
     message.ok ? item.resolve(message) : item.reject(new Error(message.error || 'The command failed.'));
   } else if (message.type === 'preferences') {
     preferences = message.value;
+    appearance.restore(preferences.appearance);
     // Only hydrate once: acknowledgements for earlier drags must not undo newer moves.
     if (!layoutLoaded) { workspace.restore(preferences.workspaceLayout, !!preferences.chatCollapsed); layoutLoaded = true; }
     if (message.videoUrl || (!currentVideo && preferences.helltubeUrl)) loadVideo(message.videoUrl || preferences.helltubeUrl);

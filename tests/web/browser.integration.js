@@ -4,6 +4,188 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
+async function checkPreviewFontPermission(browser, url) {
+  const page = await browser.newPage();
+  try {
+    await page.addInitScript(() => {
+      window.fontRequests = 0;
+      Object.defineProperty(window, 'queryLocalFonts', { configurable: true, value: () => {
+        window.fontRequests++;
+        if (window.fontRequests === 1) return new Promise((resolve, reject) => {
+          window.rejectFontAccess = () => reject(new DOMException('Permission denied', 'NotAllowedError'));
+        });
+        return Promise.resolve([{ family: 'Arial' }, { family: 'Consolas' }]);
+      } });
+    });
+    await page.goto(url);
+    await page.locator('#menu summary').click(); await page.locator('#appearance-settings').click();
+    await page.getByRole('button', { name: 'Choose chat font', exact: true }).click();
+    await page.getByText('7 fonts · Waiting for browser font permission…', { exact: true }).waitFor();
+    assert.equal(await page.locator('#font-browser-hint').isVisible(), true);
+    assert.equal(await page.locator('#font-results button').count(), 7);
+    await page.evaluate(() => window.rejectFontAccess());
+    await page.getByRole('button', { name: 'Retry font access', exact: true }).waitFor();
+    assert.match(await page.locator('#font-error').textContent(), /did not allow access/);
+    assert.equal(await page.locator('#font-spinner').isVisible(), false);
+    await page.getByRole('button', { name: 'Retry font access', exact: true }).click();
+    await page.locator('#font-results').getByRole('button', { name: 'Consolas', exact: true }).waitFor();
+    assert.equal(await page.locator('#font-results button').count(), 9);
+    assert.equal(await page.locator('#font-browser-hint').isVisible(), false);
+    assert.equal(await page.locator('#font-error').isVisible(), false);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Choose UI font', exact: true }).click();
+    assert.equal(await page.locator('#font-results button').count(), 9);
+    assert.equal(await page.evaluate(() => window.fontRequests), 2, 'successful retry is shared by both pickers');
+  } finally { await page.close(); }
+}
+
+async function chooseFont(page, kind, name) {
+  await page.getByRole('button', { name: `Choose ${kind} font`, exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Search fonts' }).fill(name);
+  await page.locator('#font-results').getByRole('button', { name, exact: true }).click();
+}
+
+async function checkFontPicker(page) {
+  await page.getByRole('button', { name: 'Choose chat font', exact: true }).click();
+  const picker = page.locator('#font-dialog');
+  await picker.waitFor();
+  await picker.getByRole('button', { name: 'Zulu Demo', exact: true }).waitFor();
+  assert.equal(await page.locator('#font-spinner').isVisible(), true, 'dialog is usable before discovery completes');
+  const names = () => page.locator('#font-results .font-name').allTextContents();
+  assert.deepEqual((await names()).slice(7), ['Zulu Demo', 'Alpha Demo', 'Wingdings', 'Consolas', 'Georgia']);
+  const search = page.getByRole('searchbox', { name: 'Search fonts' });
+  await search.fill('Demo');
+  assert.deepEqual(await names(), ['Alpha Demo', 'Zulu Demo']);
+  await picker.getByRole('button', { name: 'Zulu Demo', exact: true }).focus();
+  await page.evaluate(() => { window.fontRow = document.activeElement; window.releaseFonts(); });
+  await picker.getByRole('button', { name: 'Aardvark Demo', exact: true }).waitFor();
+  assert.deepEqual(await names(), ['Alpha Demo', 'Zulu Demo', 'Beta Demo', 'Aardvark Demo'], 'late arrivals append without sorting');
+  assert.equal(await page.evaluate(() => document.activeElement === window.fontRow), true, 'new font rows retain focus and existing DOM');
+  assert.equal(await page.locator('#font-spinner').isVisible(), false);
+  await search.fill('');
+  const alphabetical = await names();
+  assert.deepEqual(alphabetical, [...alphabetical].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })));
+  await search.fill('no font matches this');
+  assert.equal(await page.locator('#font-empty').isVisible(), true);
+  await page.keyboard.press('Escape');
+  const calls = await page.evaluate(() => window.commands.filter(m => m.command === 'fonts').length);
+  await chooseFont(page, 'UI', 'Wingdings');
+  assert.equal(await page.evaluate(() => window.commands.filter(m => m.command === 'fonts').length), calls, 'UI and chat share the loaded cache');
+  assert.match(await page.locator('body').evaluate(el => getComputedStyle(el).fontFamily), /Wingdings/);
+  await page.getByRole('button', { name: 'Choose UI font', exact: true }).click();
+  assert.match(await picker.locator('.font-name').first().evaluate(el => getComputedStyle(el).fontFamily), /Segoe UI/);
+  assert.match(await picker.getByRole('button', { name: 'Wingdings', exact: true }).locator('.font-preview').evaluate(el => getComputedStyle(el).fontFamily), /Wingdings/);
+  await page.keyboard.press('Escape');
+}
+
+async function checkColorPicker(page) {
+  const field = page.getByRole('textbox', { name: 'UI accent color', exact: true });
+  for (const [value, expected] of [['abc', '#aabbcc'], ['#AbC', '#aabbcc'], ['ABCDEF', '#abcdef'], ['Rebeccapurple', '#663399'], ['coral', '#ff7f50']]) {
+    await field.fill(value);
+    assert.equal(await page.evaluate(() => document.documentElement.style.getPropertyValue('--accent-color')), expected);
+  }
+  await field.fill('not a color');
+  assert.equal(await field.evaluate(input => input.checkValidity()), false);
+  await page.getByRole('button', { name: 'Save appearance', exact: true }).click();
+  assert.equal(await page.locator('#appearance-dialog').isVisible(), true);
+  await page.getByRole('button', { name: 'Pick UI accent color', exact: true }).click();
+  const input = page.getByRole('textbox', { name: 'Hex code or CSS color name' });
+  await input.fill('00ff00');
+  assert.equal(await page.locator('#color-hue-range').inputValue(), '120');
+  await input.fill('blue');
+  assert.equal(await page.locator('#color-hue-range').inputValue(), '240');
+  assert.equal(await page.locator('#color-saturation-range').inputValue(), '100');
+  const plane = page.getByRole('slider', { name: 'Saturation and value' });
+  await plane.focus(); await page.keyboard.press('Shift+ArrowLeft');
+  assert.equal(await page.locator('#color-saturation-range').inputValue(), '90');
+  const bounds = await plane.boundingBox();
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down(); await page.mouse.move(bounds.x + bounds.width, bounds.y); await page.mouse.up();
+  assert.equal(await page.locator('#color-saturation-range').inputValue(), '100');
+  assert.equal(await page.locator('#color-value-range').inputValue(), '100');
+  await page.locator('#color-hue-range').focus(); await page.keyboard.press('Home');
+  assert.equal(await input.inputValue(), '#FF0000');
+  await input.fill('#def');
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.getByRole('button', { name: 'Copy hex' }).click();
+  await page.getByText('Copied.', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '#DDEEFF');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('#appearance-form [name="accentColor"]').value === '#FF7F50');
+  assert.equal(await field.inputValue(), '#FF7F50', 'cancel restores the color from before opening HSV');
+  await page.getByRole('button', { name: 'Pick UI accent color', exact: true }).click();
+  await input.fill('invalidcolor');
+  await page.getByRole('button', { name: 'Use color', exact: true }).click();
+  assert.equal(await page.locator('#color-dialog').isVisible(), true);
+  await input.fill('aliceblue');
+  await page.getByRole('button', { name: 'Use color', exact: true }).click();
+  assert.equal(await field.inputValue(), '#F0F8FF');
+}
+
+async function checkAppearance(page) {
+  const log = '[14:32:08] (Channel) 雪😀: Hello\n\nSecond line\n[02:33:10 PM] (Private) Bob: Hi!';
+  const deliver = () => page.evaluate(text => window.deliver({ type: 'log', text, links: [
+    { start: text.indexOf('雪'), length: 3, href: 'clientid://id.7/test' },
+    { start: text.indexOf('Bob'), length: 3, href: 'clientid://id.8/test' }
+  ] }), log);
+  const style = (selector, property) => page.locator(selector).first().evaluate((node, prop) => getComputedStyle(node)[prop], property);
+  const open = async () => {
+    await page.locator('#menu summary').click();
+    await page.getByRole('button', { name: 'Appearance Accent colors' }).click();
+  };
+  const color = async (name, value) => {
+    await page.locator(`[name="${name}"]`).fill(value);
+    await page.locator(`[name="${name}"]`).dispatchEvent('input');
+  };
+  await deliver();
+  assert.equal(await page.locator('#chat-log .chat-entry').count(), 2);
+  assert.equal(await page.locator('#chat-log').textContent(), log);
+  assert.deepEqual(await page.locator('#chat-log .chat-username').allTextContents(), ['雪😀', 'Bob']);
+  assert.equal(await page.locator('#chat-log a').count(), 0);
+  assert.equal(await style('#chat-log .chat-timestamp', 'color'), 'rgb(143, 169, 191)');
+  assert.equal(await style('#chat-log .chat-username', 'color'), 'rgb(232, 184, 126)');
+  assert.equal(await style('#chat-log .chat-entry + .chat-entry', 'borderTopWidth'), '1px');
+  await open();
+  await checkFontPicker(page);
+  await checkColorPicker(page);
+  await color('accentColor', '#287fca');
+  await color('timestampColor', '#80c0e0');
+  await color('usernameColor', '#f0c080');
+  await color('linkColor', '#88ddaa');
+  await chooseFont(page, 'chat', 'Consolas');
+  await chooseFont(page, 'UI', 'Georgia');
+  assert.equal(await style('#chat-log .chat-timestamp', 'color'), 'rgb(128, 192, 224)');
+  assert.equal(await style('#chat-log .chat-username', 'color'), 'rgb(240, 192, 128)');
+  assert.equal(await style('#appearance-preview a', 'color'), 'rgb(136, 221, 170)');
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#appearance-dialog .primary')).backgroundColor === 'rgb(40, 127, 202)');
+  assert.match(await style('#chat-log', 'fontFamily'), /Consolas/);
+  assert.match(await style('#chat-message', 'fontFamily'), /Consolas/);
+  assert.match(await style('body', 'fontFamily'), /Georgia/);
+  await page.getByRole('button', { name: 'Save appearance', exact: true }).click();
+  await page.locator('#appearance-dialog').waitFor({ state: 'hidden' });
+  await page.reload(); await page.getByText('RNNoise · enabled').waitFor(); await deliver();
+  assert.equal(await style('#chat-log .chat-timestamp', 'color'), 'rgb(128, 192, 224)');
+  assert.match(await style('#chat-message', 'fontFamily'), /Consolas/);
+  assert.match(await style('body', 'fontFamily'), /Georgia/);
+  await open(); await page.getByRole('button', { name: 'Reset defaults' }).click();
+  assert.equal(await style('#chat-log .chat-timestamp', 'color'), 'rgb(143, 169, 191)');
+  await page.keyboard.press('Escape');
+  await page.locator('#appearance-dialog').waitFor({ state: 'hidden' });
+  assert.equal(await style('#chat-log .chat-timestamp', 'color'), 'rgb(128, 192, 224)');
+  await open(); await color('timestampColor', '#ffffff');
+  await page.evaluate(() => { window.failAppearanceSave = true; });
+  await page.getByRole('button', { name: 'Save appearance', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'Appearance could not be saved.' }).waitFor();
+  await page.locator('#appearance-dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+  assert.equal(await style('#chat-log .chat-timestamp', 'color'), 'rgb(128, 192, 224)');
+  await page.evaluate(() => { window.failAppearanceSave = false; });
+  await open(); await page.getByRole('button', { name: 'Reset defaults' }).click();
+  await page.getByRole('button', { name: 'Save appearance', exact: true }).click();
+  await page.locator('#appearance-dialog').waitFor({ state: 'hidden' });
+  assert.equal(await style('#chat-log .chat-timestamp', 'color'), 'rgb(143, 169, 191)');
+  assert.match(await style('body', 'fontFamily'), /Segoe UI/);
+}
+
 async function checkChannelTree(page) {
   const state = { type: 'state', connected: true, session: 7, rnnoise: true, transmitMode: 2,
     channels: [
@@ -97,7 +279,7 @@ async function checkChannelTree(page) {
 
 test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube isolation', async () => {
   const video = createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<h1>Helltube fixture</h1><input placeholder="Room name">'); });
-  const assets = new Map(['index.html', 'app.js', 'chat.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
+  const assets = new Map(['index.html', 'app.js', 'chat.js', 'appearance.js', 'font-picker.js', 'color-picker.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
   const server = createServer(async (req, res) => {
     const file = assets.get(req.url);
     if (!file) { res.writeHead(404); res.end(); return; }
@@ -128,12 +310,23 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
           const m = JSON.parse(raw); window.commands.push(m);
           if (m.token !== 'test-capability') return;
           queueMicrotask(() => {
+            if (m.command === 'fonts') {
+              if (m.offset === 0) window.deliver({ type: 'result', id: m.id, ok: true, batch: {
+                families: ['Zulu Demo', 'Alpha Demo', 'Wingdings', 'Consolas', 'Georgia'], next: 5, complete: false } });
+              else window.releaseFonts = () => window.deliver({ type: 'result', id: m.id, ok: true,
+                batch: { families: ['Beta Demo', 'Aardvark Demo', 'Zulu Demo'], next: 8, complete: true } });
+              return;
+            }
             if (m.command === 'ready') {
               window.deliver({ type: 'preferences', value: prefs, videoUrl: prefs.helltubeUrl });
               window.deliver(state); window.deliver({ type: 'engine', ready: true });
             }
             if (m.command === 'start') { window.deliver({ type: 'engine', ready: true }); window.deliver(state); }
             if (m.command === 'preferences') {
+              if (m.appearance && window.failAppearanceSave) {
+                window.deliver({ type: 'result', id: m.id, ok: false, error: 'Appearance could not be saved.' }); return;
+              }
+              if (m.appearance) prefs.appearance = m.appearance;
               if ('chatCollapsed' in m) prefs.chatCollapsed = m.chatCollapsed;
               if (m.workspaceLayout) prefs.workspaceLayout = m.workspaceLayout;
               if (m.helltubeUrl) prefs.helltubeUrl = m.helltubeUrl;
@@ -177,6 +370,7 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     await page.frameLocator('#helltube').getByRole('heading', { name: 'Helltube fixture' }).waitFor();
     assert.equal(await page.locator('.channel-user.talking').count(), 1);
     assert.equal(await page.locator('#self-name').textContent(), 'Alice');
+    await checkAppearance(page);
     await checkChannelTree(page);
     await page.evaluate(() => window.deliver({ type: 'state', connected: true, session: 7,
       channels: [], users: [{ id: 7, name: 'Server display name', channel: 0 }] }));
@@ -480,6 +674,7 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     assert.equal(await page.locator('.channel-user').count(), 0);
     await page.screenshot({ path: 'artifacts/strife-ui.png' });
     assert.deepEqual(errors, []);
+    await checkPreviewFontPermission(browser, 'http://127.0.0.1:' + server.address().port + '/');
   } finally {
     await browser?.close();
     await Promise.all([new Promise(resolve => server.close(resolve)), new Promise(resolve => video.close(resolve))]);

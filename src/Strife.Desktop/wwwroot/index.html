@@ -11,6 +11,7 @@
     <div class="brand"><img class="brand-mark" src="assets/mark.svg" width="32" height="32" alt=""> STRIFE <span class="tagline">VOICE + VIDEO</span></div>
     <div class="appbar-right"><span id="engine-label" class="muted">Starting voice engine…</span>
       <details id="menu" class="menu"><summary>☰ Menu</summary><nav aria-label="Application menu">
+        <button id="appearance-settings">Appearance <small>Accent colors, chat font &amp; UI font</small></button>
         <button data-native="settings">Voice settings &amp; shortcuts <small>Devices, RNNoise, PTT, output, network</small></button>
         <button data-native="wizard">Audio setup wizard</button>
         <button data-native="certificate">Certificate &amp; identity</button>
@@ -90,6 +91,58 @@
       </div>
       <p id="import-status" role="status" aria-live="polite"></p>
       <div class="dialog-footer"><button type="button" class="close-dialog">Cancel</button><button id="apply-import" type="button" class="primary" hidden>Import &amp; restart voice</button></div>
+    </form>
+  </dialog>
+  <dialog id="appearance-dialog" aria-labelledby="appearance-title">
+    <form id="appearance-form">
+      <div class="dialog-heading"><span class="eyebrow">MAKE IT YOURS</span><button type="button" class="icon-button close-dialog" aria-label="Close appearance settings">×</button></div>
+      <h2 id="appearance-title">Appearance</h2>
+      <p class="muted">Preview your changes live. Save to keep them for next time.</p>
+      <fieldset class="appearance-fields"><legend>Accent colors</legend>
+        <div class="appearance-grid">
+          <div class="color-field"><label for="accent-color-text">UI accent</label><div class="color-control"><button type="button" class="color-swatch" data-color-picker="accentColor" aria-label="Pick UI accent color" aria-haspopup="dialog"></button><input id="accent-color-text" name="accentColor" aria-label="UI accent color" aria-describedby="color-format" spellcheck="false" autocomplete="off" maxlength="40" required></div><small class="color-error" hidden>Enter a hex code or CSS color name.</small></div>
+          <div class="color-field"><label for="timestamp-color-text">Timestamps</label><div class="color-control"><button type="button" class="color-swatch" data-color-picker="timestampColor" aria-label="Pick timestamp color" aria-haspopup="dialog"></button><input id="timestamp-color-text" name="timestampColor" aria-label="Timestamp color" aria-describedby="color-format" spellcheck="false" autocomplete="off" maxlength="40" required></div><small class="color-error" hidden>Enter a hex code or CSS color name.</small></div>
+          <div class="color-field"><label for="username-color-text">Usernames</label><div class="color-control"><button type="button" class="color-swatch" data-color-picker="usernameColor" aria-label="Pick username color" aria-haspopup="dialog"></button><input id="username-color-text" name="usernameColor" aria-label="Username color" aria-describedby="color-format" spellcheck="false" autocomplete="off" maxlength="40" required></div><small class="color-error" hidden>Enter a hex code or CSS color name.</small></div>
+          <div class="color-field"><label for="link-color-text">Chat links</label><div class="color-control"><button type="button" class="color-swatch" data-color-picker="linkColor" aria-label="Pick chat link color" aria-haspopup="dialog"></button><input id="link-color-text" name="linkColor" aria-label="Chat link color" aria-describedby="color-format" spellcheck="false" autocomplete="off" maxlength="40" required></div><small class="color-error" hidden>Enter a hex code or CSS color name.</small></div>
+        </div>
+        <p id="color-format" class="form-note">Paste hex with or without #, including 3-digit codes, or a CSS color name such as coral.</p>
+      </fieldset>
+      <fieldset class="appearance-fields"><legend>Fonts</legend>
+        <div class="appearance-grid">
+          <div><span class="font-field-label">Chat font</span><button type="button" class="font-choice" data-font-picker="chatFont" aria-label="Choose chat font" aria-haspopup="dialog"><span class="font-choice-name"></span><span class="font-choice-preview" aria-hidden="true">Aa Bb 0123</span><span class="font-choice-action">Browse fonts →</span></button></div>
+          <div><span class="font-field-label">UI font</span><button type="button" class="font-choice" data-font-picker="uiFont" aria-label="Choose UI font" aria-haspopup="dialog"><span class="font-choice-name"></span><span class="font-choice-preview" aria-hidden="true">Aa Bb 0123</span><span class="font-choice-action">Browse fonts →</span></button></div>
+        </div>
+        <p class="form-note">Browse installed fonts with live previews. UI font applies to Strife’s interface.</p>
+      </fieldset>
+      <div class="appearance-sample"><span class="eyebrow">CHAT PREVIEW</span><div id="appearance-preview" class="chat-preview" aria-label="Chat appearance preview"></div></div>
+      <p id="appearance-error" role="alert" hidden></p>
+      <div class="dialog-footer"><button type="button" id="reset-appearance">Reset defaults</button><button type="button" class="close-dialog">Cancel</button><button type="submit" class="primary">Save appearance</button></div>
+    </form>
+  </dialog>
+  <dialog id="font-dialog" class="picker-dialog" aria-labelledby="font-title">
+    <div class="dialog-heading"><span class="eyebrow">SYSTEM FONTS</span><button type="button" class="icon-button close-dialog" aria-label="Close font picker">×</button></div>
+    <h2 id="font-title">Choose font</h2>
+    <label class="sr-only" for="font-search">Search fonts</label><input type="search" id="font-search" placeholder="Search installed fonts…" autocomplete="off" autofocus>
+    <div class="font-loading" role="status"><span id="font-spinner" class="spinner" aria-hidden="true" hidden></span><span id="font-progress"></span></div>
+    <p id="font-browser-hint" class="form-note" hidden>These are the built-in fallback fonts. The preview is waiting for permission to read installed fonts. Allow local font access in the browser prompt, or open Strife’s desktop app to browse them directly.</p>
+    <p id="font-error" class="picker-error" role="alert" hidden></p>
+    <div id="font-results" aria-label="Available fonts" aria-busy="false"></div><p id="font-empty" class="muted" hidden>No fonts match your search.</p>
+    <div class="dialog-footer"><button type="button" id="font-retry" hidden>Retry font access</button><button type="button" class="close-dialog">Cancel</button></div>
+  </dialog>
+  <dialog id="color-dialog" class="picker-dialog" aria-labelledby="color-title">
+    <form id="color-form">
+      <div class="dialog-heading"><span class="eyebrow">HSV COLOR</span><button type="button" class="icon-button close-dialog" aria-label="Close color picker">×</button></div>
+      <h2 id="color-title">Choose color</h2>
+      <div id="color-plane" role="slider" tabindex="0" aria-label="Saturation and value" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-describedby="color-plane-help"><span id="color-cursor"></span></div>
+      <p id="color-plane-help" class="sr-only">Left and right arrows change saturation. Up and down change value. Hold Shift for larger steps.</p>
+      <label class="hsv-control" for="color-hue-range"><span>Hue</span><output id="color-hue-output" for="color-hue-range"></output><input type="range" id="color-hue-range" min="0" max="360" step="1"></label>
+      <label class="hsv-control" for="color-saturation-range"><span>Saturation</span><output id="color-saturation-output" for="color-saturation-range"></output><input type="range" id="color-saturation-range" min="0" max="100" step="1"></label>
+      <label class="hsv-control" for="color-value-range"><span>Value</span><output id="color-value-output" for="color-value-range"></output><input type="range" id="color-value-range" min="0" max="100" step="1"></label>
+      <label for="color-value">Hex code or CSS color name</label>
+      <div class="color-text-row"><span id="color-sample" aria-hidden="true"></span><input id="color-value" required maxlength="40" autocomplete="off" spellcheck="false" aria-describedby="color-picker-format color-input-error"><button type="button" id="color-copy">Copy hex</button></div>
+      <p id="color-picker-format" class="form-note">Examples: #00E0BB, 00e0bb, #abc, abc, rebeccapurple.</p>
+      <p id="color-input-error" class="picker-error" hidden>Enter a hex code or CSS color name.</p><span id="color-copy-status" role="status"></span>
+      <div class="dialog-footer"><button type="button" class="close-dialog">Cancel</button><button type="submit" class="primary">Use color</button></div>
     </form>
   </dialog>
   <dialog id="video-dialog">

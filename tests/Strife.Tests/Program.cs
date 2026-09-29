@@ -29,11 +29,13 @@ Check(url.Host == "[::1]" && url.Port == 64738, "IPv6 Mumble address");
 Check(Uri.UnescapeDataString(url.UserInfo) == "a@b:p/#?@", "Mumble credentials round trip without URL injection");
 Reject(() => PreferencesStore.MumbleUrl("example.com/path", 64738, "test", ""), "reject host path injection");
 Reject(() => PreferencesStore.MumbleUrl("example.com", 0, "test", ""), "reject invalid port");
+await FontTests.Run(Check);
 var preferences = new PreferencesStore(directory);
 preferences.Load();
 preferences.Save(new("https://video.example.com", "voice.example.com", 64738, "alice", true));
 var restored = new PreferencesStore(directory); restored.Load();
 Check(restored.Current == preferences.Current, "preferences persist across launches");
+Check(restored.Current.Appearance is null, "older preferences use default appearance");
 Check(!File.ReadAllText(Path.Combine(directory, "preferences.json")).Contains("password"), "passwords excluded from preferences");
 await using (var voice = new VoiceEngine(directory))
 {
@@ -70,6 +72,28 @@ await using (var voice = new VoiceEngine(directory))
         helltubeUrl = "https://video.example.com/room" }));
     Check(preferences.Current.WorkspaceLayout is { } keptLayout && JsonElement.DeepEquals(keptLayout, layout),
         "other preference changes preserve the workspace");
+    replies.Clear();
+    await bridge.ReceiveAsync(origin, JsonSerializer.Serialize(new { token = bridge.Token, command = "fonts", id = "fonts", offset = 0 }));
+    Check(replies.Single().GetProperty("batch").GetProperty("families").GetArrayLength() > 0,
+        "authenticated shell receives a bounded batch of installed fonts without voice");
+    var appearance = new AppearancePreferences("#287fca", "#80c0e0", "#f0c080", "#88ddaa", "local:Arial", "local:Georgia");
+    replies.Clear();
+    await bridge.ReceiveAsync(origin, JsonSerializer.Serialize(new { token = bridge.Token, command = "preferences", id = "appearance", appearance }));
+    var appearanceSaved = new PreferencesStore(directory); appearanceSaved.Load();
+    Check(appearanceSaved.Current.Appearance == appearance && replies.Last().GetProperty("ok").GetBoolean(),
+        "appearance colors and independent fonts persist through the desktop bridge across launches");
+    Check(appearanceSaved.Current.WorkspaceLayout is { } appearanceLayout && JsonElement.DeepEquals(appearanceLayout, layout)
+        && appearanceSaved.Current.Username == "SavedUser", "appearance changes preserve workspace and connection preferences");
+    await bridge.ReceiveAsync(origin, JsonSerializer.Serialize(new { token = bridge.Token, command = "preferences", id = "keep-appearance", chatCollapsed = false }));
+    Check(preferences.Current.Appearance == appearance, "unrelated preference writes preserve appearance");
+    foreach (var invalid in new object[] { appearance with { AccentColor = "red; color:green" },
+        appearance with { ChatFont = "unknown-font" }, new { accentColor = 123 }, "invalid" })
+    {
+        replies.Clear();
+        await bridge.ReceiveAsync(origin, JsonSerializer.Serialize(new { token = bridge.Token, command = "preferences", id = "invalid-appearance", appearance = invalid }));
+        Check(!replies.Single().GetProperty("ok").GetBoolean() && preferences.Current.Appearance == appearance,
+            "invalid appearance is rejected without overwriting saved preferences");
+    }
     foreach (var invalid in new object[] { "not an object", new { oversized = new string('x', 9000) } })
     {
         replies.Clear();

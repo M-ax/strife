@@ -52,7 +52,8 @@ function textParts(text, links) {
     if (link.start < position) continue;
     parts.push(...parseUrls(text.slice(position, link.start)));
     const href = chatUrl(link.href);
-    parts.push({ text: text.slice(link.start, link.start + link.length), ...(href ? { href } : {}) });
+    parts.push({ text: text.slice(link.start, link.start + link.length), ...(href ? { href } : {}),
+      ...(typeof link.href === 'string' && /^clientid:\/\//i.test(link.href) ? { kind: 'username' } : {}) });
     position = link.start + link.length;
   }
   parts.push(...parseUrls(text.slice(position)));
@@ -95,24 +96,58 @@ export function chatParts(text, links = [], images = []) {
   return parts;
 }
 
+export function chatMessages(text, links, images) {
+  // The existing native log includes Mumble's 24-hour or AM/PM timestamp at
+  // each message start. Continuation lines stay with their message. All ranges
+  // use the original UTF-16 text, including links and image placeholders.
+  const headers = [...text.matchAll(/^\[(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?: [AP]M)?\](?=\s|$)/gm)];
+  const messages = [];
+  let header = 0, offset = 0, current;
+  for (const part of chatParts(text, links, images)) {
+    let position = 0;
+    while (position < part.text.length) {
+      const start = offset + position;
+      if (!current || headers[header]?.index === start) {
+        current = { parts: [], timestampEnd: headers[header]?.index === start ? start + headers[header++][0].length : 0 };
+        messages.push(current);
+      }
+      const end = Math.min(offset + part.text.length, headers[header]?.index ?? Infinity,
+        current.timestampEnd > start ? current.timestampEnd : Infinity);
+      current.parts.push({ ...part, text: part.text.slice(position, end - offset),
+        ...(start < current.timestampEnd ? { kind: 'timestamp' } : {}) });
+      position = end - offset;
+    }
+    offset += part.text.length;
+  }
+  return messages.map(message => message.parts);
+}
+
 export function renderChat(log, text, links, images) {
   const document = log.ownerDocument, fragment = document.createDocumentFragment();
-  for (const part of chatParts(text, links, images)) {
-    let content;
-    if (part.image) {
-      content = document.createElement('img');
-      content.alt = part.image.alt || 'Chat image';
-      if (part.image.width) { content.width = part.image.width; content.height = part.image.height; }
-      content.addEventListener('error', () => {
-        content.replaceWith(document.createTextNode('[' + (part.image.alt || 'Image unavailable') + ']'));
-      }, { once: true });
-      content.src = part.image.src;
-    } else content = document.createTextNode(part.image === null ? '[Image unavailable]' : part.text);
-    if (!part.href) { fragment.append(content); continue; }
-    const anchor = document.createElement('a');
-    anchor.append(content); anchor.href = part.href;
-    anchor.title = part.href; anchor.target = '_blank'; anchor.rel = 'noopener noreferrer';
-    fragment.append(anchor);
+  for (const parts of chatMessages(text, links, images)) {
+    const row = document.createElement('div'); row.className = 'chat-entry';
+    for (const part of parts) {
+      let content;
+      if (part.image) {
+        const image = document.createElement('img');
+        image.alt = part.image.alt || 'Chat image';
+        if (part.image.width) { image.width = part.image.width; image.height = part.image.height; }
+        image.addEventListener('error', () => {
+          image.replaceWith(document.createTextNode('[' + (part.image.alt || 'Image unavailable') + ']'));
+        }, { once: true });
+        image.src = part.image.src; content = image;
+      } else content = document.createTextNode(part.image === null ? '[Image unavailable]' : part.text);
+      if (part.kind) {
+        const span = document.createElement('span'); span.className = 'chat-' + part.kind;
+        span.append(content); content = span;
+      }
+      if (!part.href) { row.append(content); continue; }
+      const anchor = document.createElement('a');
+      anchor.append(content); anchor.href = part.href;
+      anchor.title = part.href; anchor.target = '_blank'; anchor.rel = 'noopener noreferrer';
+      row.append(anchor);
+    }
+    fragment.append(row);
   }
   log.replaceChildren(fragment);
 }

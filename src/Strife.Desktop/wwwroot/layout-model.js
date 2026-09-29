@@ -1,6 +1,7 @@
 export const PANEL_IDS = ['rooms', 'chat', 'controls', 'video'];
 export const GAP = 0;
 export const BAR = 42;
+const CONTROLS_HEIGHT = 240;
 const split = (axis, ratio, first, second) => ({ axis, ratio, first, second });
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -80,12 +81,13 @@ export function floatingRect(item, width, height, collapsed = false) {
 export function measureLayout(layout, width, height) {
   const panels = new Map(), dividers = [];
   function minimum(node, axis) {
-    if (typeof node === 'string') return layout.collapsed[node] ? BAR : axis === 'x' ? (node === 'video' ? 280 : 220) : (node === 'controls' ? 200 : 180);
+    if (typeof node === 'string') return layout.collapsed[node] ? BAR : axis === 'x' ? (node === 'video' ? 280 : 220) : (node === 'controls' ? CONTROLS_HEIGHT : 180);
     const a = minimum(node.first, axis), b = minimum(node.second, axis);
     return node.axis === axis ? a + b + GAP : Math.max(a, b);
   }
   function fixed(node, axis) {
-    if (typeof node === 'string') return layout.collapsed[node] ? BAR : null;
+    // Fixed heights only constrain vertical splits; a lone column still fills its height.
+    if (typeof node === 'string') return layout.collapsed[node] ? BAR : node === 'controls' && axis === 'y' ? CONTROLS_HEIGHT : null;
     const a = fixed(node.first, axis), b = fixed(node.second, axis);
     return a === null || b === null ? null : node.axis === axis ? a + b + GAP : Math.max(a, b);
   }
