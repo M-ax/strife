@@ -49,6 +49,25 @@ jobs:
           $version = Get-StrifeVersion $env:RELEASE_VERSION
           if ((Get-StrifeRuntime) -ne '${{ matrix.runtime }}') { throw 'Runner architecture does not match the release target.' }
           "STRIFE_VERSION=$version" >> $env:GITHUB_ENV
+      # Check the small, runnable payload before installing or restoring native build tools.
+      # Keep this key independent of app versions, managed/UI code and packaging changes.
+      - name: Restore compiled Mumble engine
+        id: voice-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: artifacts/voice
+          key: voice-${{ matrix.runtime }}-${{ hashFiles('native/**', 'scripts/build-voice.ps1', 'scripts/prepare-release.ps1', 'packaging/native-dependencies.json') }}
+      - name: Report Mumble cache result
+        env:
+          VOICE_CACHE_HIT: ${{ steps.voice-cache.outputs.cache-hit }}
+        run: |
+          if ($env:VOICE_CACHE_HIT -eq 'true') {
+            $message = 'Reusing compiled Mumble (${{ matrix.runtime }}); skipping native source checkout, toolchain restore and compilation.'
+          } else {
+            $message = 'No exact compiled Mumble cache (${{ matrix.runtime }}); building the pinned native inputs and caching the result.'
+          }
+          Write-Host $message
+          $message >> $env:GITHUB_STEP_SUMMARY
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
@@ -56,17 +75,24 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Install Linux build and runtime dependencies
+      - name: Install Linux runtime and test dependencies
         if: runner.os == 'Linux'
         shell: bash
         run: |
           sudo apt-get update
+          sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0 libnotify4 libasound2t64 \
+            libsm6 libice6 libx11-xcb1 libxi6 libxrender1 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+            libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 libgl1 libegl1 xvfb xauth
+      - name: Install Linux native build tools
+        if: runner.os == 'Linux' && steps.voice-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
           sudo apt-get install -y ninja-build pkg-config libasound2-dev libsm-dev \
             '^libxcb.*-dev' libx11-xcb-dev libglu1-mesa-dev libxrender-dev libxi-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev libegl1-mesa-dev \
-            libgtk-3-0 libwebkit2gtk-4.1-0 libnotify4 xvfb xauth
+            libxkbcommon-dev libxkbcommon-x11-dev libegl1-mesa-dev
       - name: Install macOS build tools
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.voice-cache.outputs.cache-hit != 'true'
         shell: bash
         run: brew install ninja xz
       - name: Install Windows packaging tools
@@ -79,16 +105,12 @@ jobs:
           }
           $setup = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -WindowStyle Hidden -Wait -PassThru
           if ($setup.ExitCode -ne 0) { throw "Inno Setup installation failed: $($setup.ExitCode)" }
-      - uses: actions/cache@v5
+      - name: Restore native compiler toolchain
+        if: steps.voice-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
         with:
           path: artifacts/build-env
           key: native-${{ matrix.runtime }}-${{ hashFiles('packaging/native-dependencies.json') }}
-      - name: Restore compiled native voice
-        id: voice-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: artifacts/voice
-          key: voice-${{ matrix.runtime }}-${{ hashFiles('native/**', 'scripts/build-voice.ps1', 'scripts/prepare-release.ps1', 'packaging/native-dependencies.json') }}
       - name: Fetch pinned native sources and toolchain
         if: steps.voice-cache.outputs.cache-hit != 'true'
         run: ./scripts/prepare-release.ps1 -Runtime '${{ matrix.runtime }}'
@@ -100,7 +122,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: artifacts/voice
-          key: voice-${{ matrix.runtime }}-${{ hashFiles('native/**', 'scripts/build-voice.ps1', 'scripts/prepare-release.ps1', 'packaging/native-dependencies.json') }}
+          key: ${{ steps.voice-cache.outputs.cache-primary-key }}
       - name: Run managed and web tests
         run: |
           dotnet run --project tests/Strife.Tests -c Release

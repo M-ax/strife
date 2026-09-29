@@ -20,6 +20,14 @@ The ZIP/tar archives include .NET, the voice engine, UI assets and dependency no
 
 The platform requirements, prerequisite bundles, and signing status above are unchanged.
 
+## Reusing compiled Mumble
+
+Release jobs first restore the complete compiled voice payload for their platform, including its libraries, resources and license notices. On an exact cache hit they skip the Mumble checkout, native compiler toolchain restore, build-tool installation and C++ compilation. Linux still installs runtime libraries needed to launch the packaged app and engine. Managed/web tests, packaging, native startup checks and Windows installer checks run on every release, including cache hits.
+
+The cache key depends only on the runtime, the native bridge, the native build/preparation scripts and the pinned dependency manifest. App versions, desktop C# and web UI changes, documentation, packaging scripts and workflow edits do not invalidate it. The current key format is preserved so the engines built for preview.3 can be reused immediately. The workflow's job summary states whether it reused Mumble or rebuilt it.
+
+Treat Mumble and its integration as a stable native dependency: implement normal app behavior in the managed host or web UI. Changes to the bridge, native build recipe or pinned dependencies intentionally require a fresh engine; never reuse an older binary under a changed native key. A missing or evicted cache also rebuilds and saves the pinned engine automatically. Caches populated on `main` can be reused by release tags and other branches under [GitHub's cache access rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
+
 ## Local builds
 
 Use PowerShell 7 on the target OS and architecture. Cross-publishing the managed shell alone does not produce a runnable voice package and is rejected by the script. Install the SDK specified by `global.json`, CMake, Git, Python 3, and a C++ compiler. Windows uses Visual Studio 2026 C++ tools and 7-Zip; Unix builds use Ninja. Windows packaging requires Inno Setup 6.3+, with CI downloading 6.7.3 from its official GitHub release and verifying its pinned SHA-256 before installation.

@@ -1,5 +1,9 @@
 # Working in Strife
 
+## Keep native Mumble stable
+
+Treat the pinned Mumble engine and its native integration as a stable dependency. Implement ordinary app features in the managed host or web UI; change the native bridge or upstream integration only when the required capability cannot be provided there. Preserve the compiled voice cache for app-only, documentation and packaging changes. Native bridge, build recipe or dependency changes must invalidate it so releases cannot ship a stale engine. Cached engines still require the normal package and startup checks.
+
 ## Keep website documentation in sync
 
 Whenever pushing a new Strife build or build changes to `main` or `master`, always cross-check the changes against the neighboring `strife-web` repository before pushing. Review its landing page, getting-started wiki, download instructions, and release documentation. Update any affected feature descriptions, UI instructions, compatibility notes, or troubleshooting guidance, together with Strife's own documentation.
