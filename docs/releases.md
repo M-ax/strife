@@ -13,9 +13,11 @@ All four native builds must succeed before any assets are attached. Rerunning th
 
 The ZIP/tar archives include .NET, the voice engine, UI assets and dependency notices. The Windows portable ZIP needs WebView2 and the VC++ runtime already installed; the setup executable embeds both standalone redistributables for offline installation. Their Microsoft Authenticode signatures are verified during packaging. The installer checks runtime presence/version, reports prerequisite failures, handles restart requests, provides shortcuts and Apps & Features registration, removes obsolete runtime files on upgrade, rejects numeric version downgrades, and preserves profiles on uninstall.
 
-## Source updates after preview.3
+## Preview 0.1.0-preview.4
 
-The current source adds a teal default accent and matching icons, appearance settings for UI/chat colors and fonts, installed-font discovery, an HSV color picker, and clearer timestamped chat messages. User controls use a fixed 240px height when stacked and fill the available height when alone in a column. These changes are not included in the advertised 0.1.0-preview.3 packages. They require a new build; pushing source does not update existing downloads.
+This release adds a teal default accent and matching icons, appearance settings for UI/chat colors and fonts, installed-font discovery, an HSV color picker, and clearer timestamped chat messages. User controls use a fixed 240px height when stacked and fill the available height when alone in a column. Platform requirements and signing status are unchanged.
+
+Publishing includes all five installer/archive packages in the website's R2 bucket. Import the validated packages into the neighboring `strife-web` repository with this build's exact source commit, upload them before deploying the new manifest, and verify the production downloads with `npm run release:verify`. A source push alone does not update downloads.
 
 ## Preview 0.1.0-preview.3
 

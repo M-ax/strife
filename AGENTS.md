@@ -6,6 +6,8 @@ Treat the pinned Mumble engine and its native integration as a stable dependency
 
 ## Keep website documentation in sync
 
+An authorized build/release push includes publishing the installers and platform archives to R2, not just pushing source and updating website documentation, unless the user explicitly requests a source-only update. Build and validate all advertised platforms using the pinned native cache, choose a new immutable version, import the actual packages into `strife-web` with their exact source commit, and run `npm run release:upload` before deploying the updated website. Run `npm run release:verify` against production after deployment to verify every advertised download's bytes, SHA-256, headers, and range support. Do not report the release as published until R2 uploads, website deployment, and production verification succeed; report any blocked platform or publishing step explicitly.
+
 Whenever pushing a new Strife build or build changes to `main` or `master`, always cross-check the changes against the neighboring `strife-web` repository before pushing. Review its landing page, getting-started wiki, download instructions, and release documentation. Update any affected feature descriptions, UI instructions, compatibility notes, or troubleshooting guidance, together with Strife's own documentation.
 
 - Follow `strife-web/AGENTS.md`. Its `release.json` identifies the advertised packages and their source revision. Update version, filenames, and `sourceRef` only when they describe the actual new packages; distinguish source-only fixes from features available in the published downloads.
