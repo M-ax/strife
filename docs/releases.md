@@ -57,7 +57,8 @@ Linux users need the runtime libraries, not the compiler/development packages. F
 sudo apt-get install libgtk-3-0 libwebkit2gtk-4.1-0 libnotify4 libasound2t64 \
   libsm6 libice6 libx11-xcb1 libxi6 libxrender1 libxcb-cursor0 \
   libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
-  libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 libgl1 libegl1
+  libxcb-xinerama0 libxcb-xkb1 libxcb-shape0 libxcb-xinput0 \
+  libxkbcommon-x11-0 libgl1 libopengl0 libegl1
 tar -xzf Strife-VERSION-linux-x64.tar.gz
 ./Strife/Strife
 ```
