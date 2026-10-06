@@ -122,6 +122,54 @@ export function chatMessages(text, links, images) {
   return messages.map(message => message.parts);
 }
 
+function viewChatImage(log, attachment, trigger) {
+  const document = log.ownerDocument;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'chat-image-viewer';
+  dialog.setAttribute('aria-label', 'Chat image viewer');
+  const toolbar = document.createElement('div'); toolbar.className = 'chat-image-toolbar';
+  const title = document.createElement('strong'); title.textContent = attachment.alt || 'Chat image';
+  const zoom = document.createElement('button'); zoom.type = 'button'; zoom.textContent = 'Actual size';
+  zoom.setAttribute('aria-pressed', 'false');
+  const close = document.createElement('button'); close.type = 'button'; close.textContent = 'Close';
+  close.setAttribute('aria-label', 'Close image viewer'); close.autofocus = true;
+  toolbar.append(title, zoom, close);
+  const stage = document.createElement('div'); stage.className = 'chat-image-stage';
+  const image = document.createElement('img'); image.alt = attachment.alt || 'Chat image';
+  image.src = attachment.src;
+  image.addEventListener('error', () => {
+    stage.textContent = 'Image unavailable'; zoom.disabled = true;
+  }, { once: true });
+  stage.append(image); dialog.append(toolbar, stage); document.body.append(dialog);
+  zoom.onclick = () => {
+    const actual = stage.classList.toggle('actual-size');
+    zoom.textContent = actual ? 'Fit to window' : 'Actual size';
+    zoom.setAttribute('aria-pressed', String(actual));
+    stage.scrollTo(0, 0);
+  };
+  close.onclick = () => dialog.close();
+  let backdropPressed = false;
+  const outside = event => {
+    const bounds = dialog.getBoundingClientRect();
+    return event.clientX < bounds.left || event.clientX > bounds.right ||
+      event.clientY < bounds.top || event.clientY > bounds.bottom;
+  };
+  dialog.addEventListener('pointerdown', event => { backdropPressed = event.target === dialog && outside(event); });
+  dialog.addEventListener('click', event => {
+    if (backdropPressed && event.target === dialog && outside(event)) dialog.close();
+    backdropPressed = false;
+  });
+  dialog.addEventListener('close', () => {
+    dialog.remove();
+    // A log update can replace the thumbnail while the viewer is open.
+    const target = trigger.isConnected ? trigger : [...log.querySelectorAll('.chat-image-button')]
+      .find(button => button.querySelector('img')?.src === attachment.src);
+    if (target) target.focus({ preventScroll: true });
+    else { log.tabIndex = -1; log.focus({ preventScroll: true }); }
+  }, { once: true });
+  dialog.showModal();
+}
+
 export function renderChat(log, text, links, images) {
   const document = log.ownerDocument, fragment = document.createDocumentFragment();
   for (const parts of chatMessages(text, links, images)) {
@@ -129,13 +177,21 @@ export function renderChat(log, text, links, images) {
     for (const part of parts) {
       let content;
       if (part.image) {
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'chat-image-button';
+        button.setAttribute('aria-label', 'View image: ' + (part.image.alt || 'Chat image'));
+        button.setAttribute('aria-haspopup', 'dialog'); button.title = 'View image';
         const image = document.createElement('img');
         image.alt = part.image.alt || 'Chat image';
         if (part.image.width) { image.width = part.image.width; image.height = part.image.height; }
         image.addEventListener('error', () => {
-          image.replaceWith(document.createTextNode('[' + (part.image.alt || 'Image unavailable') + ']'));
+          button.replaceWith(document.createTextNode('[' + (part.image.alt || 'Image unavailable') + ']'));
         }, { once: true });
-        image.src = part.image.src; content = image;
+        image.src = part.image.src; button.append(image);
+        button.onclick = () => viewChatImage(log, part.image, button);
+        row.append(button);
+        if (!part.href) continue;
+        content = document.createTextNode('Open image link');
       } else content = document.createTextNode(part.image === null ? '[Image unavailable]' : part.text);
       if (part.kind) {
         const span = document.createElement('span'); span.className = 'chat-' + part.kind;

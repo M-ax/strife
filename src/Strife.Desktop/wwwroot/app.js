@@ -2,6 +2,8 @@ import { organizeChannels, validateVideoUrl } from './model.js';
 import { createWorkspace } from './layout.js';
 import { renderChat } from './chat.js';
 import { createAppearanceSettings } from './appearance.js';
+import { createSharing } from './sharing.js';
+import { createDownloads } from './downloads.js';
 
 const $ = id => document.getElementById(id);
 // Keep the per-launch capability in this history entry so F5 can reattach.
@@ -33,11 +35,13 @@ function request(command, data = {}) {
 async function run(command, data) {
   try { return await request(command, data); } catch (error) { notice(error.message); throw error; }
 }
+const sharing = createSharing({request, notice});
 let layoutLoaded = false;
 const workspace = createWorkspace($('workspace'), layout => {
   if (native) run('preferences', { workspaceLayout: layout, chatCollapsed: layout.collapsed.chat }).catch(() => {});
   else { try { localStorage.setItem('strife-workspace', JSON.stringify(layout)); } catch {} }
 });
+const downloads = createDownloads({request, notice});
 if (!native) {
   try { workspace.restore(JSON.parse(localStorage.getItem('strife-workspace'))); } catch {}
 }
@@ -48,7 +52,7 @@ function openVideoSettings() {
 function loadVideo(value) {
   const url = validateVideoUrl(value);
   if (url === currentVideo) return;
-  currentVideo = url; $('helltube').src = url; $('video-welcome').hidden = true;
+  currentVideo = url; sharing.load(url); $('helltube').src = url; $('video-welcome').hidden = true;
   $('video-address').textContent = new URL(preferences.helltubeUrl || url).host;
 }
 function showState(next) {
@@ -144,7 +148,9 @@ function renderTree() {
 }
 function receive(raw) {
   let message; try { message = JSON.parse(raw); } catch { return; }
-  if (message.type === 'result') {
+  if (message.type === 'downloads') {
+    downloads.receive(message);
+  } else if (message.type === 'result') {
     const item = pending.get(message.id); if (!item) return;
     clearTimeout(item.timer); pending.delete(message.id);
     message.ok ? item.resolve(message) : item.reject(new Error(message.error || 'The command failed.'));
@@ -155,6 +161,8 @@ function receive(raw) {
     if (!layoutLoaded) { workspace.restore(preferences.workspaceLayout, !!preferences.chatCollapsed); layoutLoaded = true; }
     if (message.videoUrl || (!currentVideo && preferences.helltubeUrl)) loadVideo(message.videoUrl || preferences.helltubeUrl);
     showState(state);
+  } else if (message.type === 'streaming') {
+    sharing.available(message.available);
   } else if (message.type === 'engine') {
     engineReady = message.ready; $('engine-label').textContent = engineReady ? 'Voice engine ready' : 'Voice engine offline';
     if (!engineReady) {

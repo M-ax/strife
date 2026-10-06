@@ -3,7 +3,9 @@ using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 
@@ -11,9 +13,34 @@ namespace Strife;
 
 // Keep Helltube on a separate, same-site loopback origin for its Strict cookies.
 // Narrow framing to this shell, including compatibility with older Helltube servers.
-public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
+public sealed class HelltubeProxy(Uri shellOrigin, DownloadManager? downloads = null) : IAsyncDisposable
 {
     private readonly Dictionary<string, Endpoint> endpoints = [];
+    private readonly Dictionary<string, string> embeds = [];
+
+    public async Task<string> LoadEmbedAsync(string address)
+    {
+        var fallback = await LoadAsync(address);
+        var upstream = PreferencesStore.ValidateHelltubeUrl(address).GetLeftPart(UriPartial.Authority);
+        if (embeds.TryGetValue(upstream, out var cached)) return cached;
+        // Probe the explicit entry point; old servers keep the ordinary iframe.
+        using var probe = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(5), MaxResponseContentBufferSize = 128 * 1024 };
+        try
+        {
+            using var response = await probe.GetAsync(upstream + "/embed/strife.html");
+            if (response.IsSuccessStatusCode && (await response.Content.ReadAsStringAsync()).Contains("name=\"helltube-embed\"", StringComparison.Ordinal))
+            {
+                var local = new Uri(fallback).GetLeftPart(UriPartial.Authority);
+                var result = local + "/embed/strife.html#parent=" + Uri.EscapeDataString(shellOrigin.GetLeftPart(UriPartial.Authority))
+                    + "&session=" + Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+                embeds[upstream] = result;
+                return result;
+            }
+        }
+        catch (Exception error) when (error is HttpRequestException or TaskCanceledException) { }
+        // Retry discovery on a later load, allowing an older server to be upgraded.
+        return fallback;
+    }
 
     public async Task<string> LoadAsync(string address)
     {
@@ -21,7 +48,7 @@ public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
         var authority = target.GetLeftPart(UriPartial.Authority);
         if (!endpoints.TryGetValue(authority, out var endpoint))
         {
-            endpoint = new Endpoint(new Uri(authority), shellOrigin);
+            endpoint = new Endpoint(new Uri(authority), shellOrigin, downloads);
             await endpoint.StartAsync();
             endpoints.Add(authority, endpoint);
         }
@@ -33,7 +60,7 @@ public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
         foreach (var endpoint in endpoints.Values) await endpoint.DisposeAsync();
     }
 
-    private sealed class Endpoint(Uri upstream, Uri shell) : IAsyncDisposable
+    private sealed class Endpoint(Uri upstream, Uri shell, DownloadManager? downloads) : IAsyncDisposable
     {
         private static readonly HashSet<string> HopHeaders = new(StringComparer.OrdinalIgnoreCase)
         { "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Host" };
@@ -44,7 +71,9 @@ public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
         }) { Timeout = Timeout.InfiniteTimeSpan };
         private readonly string cookiePrefix = "strife_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(upstream.AbsoluteUri)))[..16] + "_";
         private WebApplication? server;
-        private string? directOrigin;
+        private sealed record DeliveryOrigins(string? ProxyOrigin, string? MediaOrigin);
+        private volatile DeliveryOrigins deliveryOrigins = new(null, null);
+        private const string MediaOriginHeader = "X-Strife-Media-Origin";
         public string Origin { get; private set; } = "";
 
         public async Task StartAsync()
@@ -84,8 +113,9 @@ public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
             if ((!string.IsNullOrEmpty(requestOrigin) && requestOrigin != Origin)
                 || (context.Request.Headers["Sec-Fetch-Site"] == "cross-site"))
             { context.Response.StatusCode = 403; return; }
-            var destinationOrigin = context.Request.Path.StartsWithSegments("/direct") && directOrigin is not null
-                ? directOrigin : upstream.GetLeftPart(UriPartial.Authority);
+            var origins = deliveryOrigins;
+            var destinationOrigin = context.Request.Path.StartsWithSegments("/direct") && origins.ProxyOrigin is not null
+                ? origins.ProxyOrigin : upstream.GetLeftPart(UriPartial.Authority);
             var destination = new Uri(destinationOrigin + context.Request.PathBase + context.Request.Path + context.Request.QueryString);
             try
             {
@@ -99,15 +129,34 @@ public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
                         // Let HttpClient advertise only encodings it can decode. Chromium also
                         // offers zstd, which would corrupt JSON/manifest rewrites here.
                         || header.Key.Equals("Accept-Encoding", StringComparison.OrdinalIgnoreCase)
+                        || header.Key.Equals(MediaOriginHeader, StringComparison.OrdinalIgnoreCase)
                         || header.Key.Equals("Origin", StringComparison.OrdinalIgnoreCase) || header.Key.Equals("Referer", StringComparison.OrdinalIgnoreCase)) continue;
                     if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray()))
                         request.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
                 }
+                // The recipient is the frame's origin, never a value supplied by JavaScript
+                // and never the outer desktop shell's separate loopback port.
+                var mediaJob = MediaAccessJob(context.Request.Path);
+                var negotiatedMediaOrigin = origins.MediaOrigin;
+                if (context.Request.Method == "GET" && (context.Request.Path == "/api/config"
+                    || (mediaJob is not null && negotiatedMediaOrigin is not null)))
+                    request.Headers.TryAddWithoutValidation(MediaOriginHeader, Origin);
                 var cookies = UpstreamCookies(context.Request.Headers.Cookie);
                 if (cookies.Length > 0) request.Headers.TryAddWithoutValidation("Cookie", cookies);
                 if (requestOrigin.Length > 0) request.Headers.TryAddWithoutValidation("Origin", upstream.GetLeftPart(UriPartial.Authority));
                 if (context.Request.Headers.ContainsKey("Referer")) request.Headers.Referrer = upstream;
                 using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+                // Only browser navigations/download links are captured. Fetch/XHR clients
+                // must still receive their response (including blob-generating clients).
+                if (downloads is not null && response.StatusCode == HttpStatusCode.OK && context.Request.Method == "GET"
+                    && context.Request.Headers["Sec-Fetch-Mode"] == "navigate"
+                    && response.Content.Headers.ContentDisposition?.DispositionType.Equals("attachment", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    var disposition = response.Content.Headers.ContentDisposition;
+                    await downloads.SaveAsync(response.Content, disposition.FileNameStar ?? disposition.FileName);
+                    context.Response.StatusCode = 204; // Preserve the current iframe document.
+                    return;
+                }
                 context.Response.StatusCode = (int)response.StatusCode;
                 foreach (var header in response.Headers.Concat(response.Content.Headers))
                 {
@@ -121,30 +170,68 @@ public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
                         context.Response.Headers[header.Key] = directives + "; frame-ancestors " + shell.GetLeftPart(UriPartial.Authority);
                     }
                     else if (header.Key.Equals("Location", StringComparison.OrdinalIgnoreCase))
-                        context.Response.Headers[header.Key] = header.Value.Select(RewriteAddresses).ToArray();
+                        context.Response.Headers[header.Key] = header.Value.Select(value => RewriteAddresses(value, origins.ProxyOrigin)).ToArray();
                     else context.Response.Headers[header.Key] = header.Value.ToArray();
                 }
-                // Some deployments separate edge/API and direct media origins.
-                // Keep canonical /direct paths and grants, routing them to the
-                // server-advertised metal origin while the browser stays local.
+                // Ordinary URLs, uploads and downloads remain local. Only the negotiated
+                // media configuration and validated access URLs may escape rewriting.
                 var mediaType = response.Content.Headers.ContentType?.MediaType;
                 if (mediaType == "application/json" && context.Request.Path.StartsWithSegments("/api"))
                 {
                     var text = await response.Content.ReadAsStringAsync(context.RequestAborted);
                     if (context.Request.Path == "/api/config" && response.IsSuccessStatusCode)
                     {
-                        var config = JsonNode.Parse(text);
-                        var advertised = config?["bareMetalOrigin"]?.GetValue<string>();
-                        if (!string.IsNullOrEmpty(advertised))
-                            directOrigin = PreferencesStore.ValidateHelltubeUrl(advertised).GetLeftPart(UriPartial.Authority);
+                        var config = JsonNode.Parse(text) as JsonObject ?? throw new JsonException("Invalid delivery configuration.");
+                        var advertised = OptionalString(config["bareMetalOrigin"]);
+                        var directOrigin = string.IsNullOrEmpty(advertised) ? null
+                            : PreferencesStore.ValidateHelltubeUrl(advertised).GetLeftPart(UriPartial.Authority);
+                        string? directMediaOrigin = null;
+                        if (config["strifeDirectMedia"] is JsonValue capability && capability.TryGetValue<int>(out var version) && version == 1)
+                        {
+                            var origin = OptionalString(config["strifeDirectMediaOrigin"]);
+                            if (origin != directOrigin || !IsSecureMediaOrigin(origin))
+                                throw new InvalidDataException("Invalid direct media origin.");
+                            directMediaOrigin = origin;
+                        }
+                        var localConfig = JsonNode.Parse(RewriteAddresses(text, directOrigin))!.AsObject();
+                        // Do not rely on textual replacement of a canonicalized authority:
+                        // aliases such as an explicit default port must stay local too.
+                        localConfig["bareMetalOrigin"] = directOrigin is null ? "" : Origin;
+                        localConfig.Remove("strifeDirectMedia");
+                        localConfig.Remove("strifeDirectMediaOrigin");
+                        if (directMediaOrigin is not null)
+                        {
+                            localConfig["strifeDirectMedia"] = 1;
+                            localConfig["strifeDirectMediaOrigin"] = directMediaOrigin;
+                        }
+                        text = localConfig.ToJsonString();
+                        // Publish only a fully validated configuration, atomically. In-flight
+                        // access requests keep the negotiation they sent to the server.
+                        deliveryOrigins = new(directOrigin, directMediaOrigin);
                     }
-                    await WriteTransformedAsync(context, RewriteAddresses(text));
+                    else if (mediaJob is not null && negotiatedMediaOrigin is not null && response.IsSuccessStatusCode)
+                    {
+                        var access = JsonNode.Parse(text) as JsonObject ?? throw new JsonException("Invalid media access.");
+                        var localAccess = JsonNode.Parse(RewriteAddresses(text, origins.ProxyOrigin))!.AsObject();
+                        foreach (var field in new[] { "url", "fallbackUrl" })
+                        {
+                            if (field == "fallbackUrl" && access[field] is null) continue;
+                            var value = OptionalString(access[field]);
+                            if (!IsDirectMediaUrl(value, negotiatedMediaOrigin, mediaJob))
+                                throw new InvalidDataException("Invalid direct media URL.");
+                            localAccess[field] = value;
+                        }
+                        text = localAccess.ToJsonString();
+                    }
+                    else text = RewriteAddresses(text, origins.ProxyOrigin);
+                    await WriteTransformedAsync(context, text);
                 }
                 else if (context.Request.Path.Value?.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) == true)
-                    await WriteTransformedAsync(context, RewriteAddresses(await response.Content.ReadAsStringAsync(context.RequestAborted)));
+                    await WriteTransformedAsync(context, RewriteAddresses(await response.Content.ReadAsStringAsync(context.RequestAborted), origins.ProxyOrigin));
                 else await response.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
             }
-            catch (Exception e) when (e is HttpRequestException or WebSocketException or OperationCanceledException or IOException)
+            catch (Exception e) when (e is HttpRequestException or WebSocketException or OperationCanceledException
+                or IOException or InvalidDataException or JsonException)
             {
                 if (!context.Response.HasStarted && !context.RequestAborted.IsCancellationRequested)
                 {
@@ -154,7 +241,26 @@ public sealed class HelltubeProxy(Uri shellOrigin) : IAsyncDisposable
             }
         }
 
-        private string RewriteAddresses(string text)
+        private static string? MediaAccessJob(PathString path)
+        {
+            var parts = path.Value?.Split('/');
+            return parts is ["", "api", "media", var job, "access"] && Guid.TryParseExact(job, "D", out _) ? job : null;
+        }
+
+        private static string? OptionalString(JsonNode? node) => node is null ? null
+            : node is JsonValue value && value.TryGetValue<string>(out var text) ? text
+            : throw new JsonException("Expected a string.");
+
+        private static bool IsSecureMediaOrigin(string? value) =>
+            Uri.TryCreate(value, UriKind.Absolute, out var uri) && value == uri.GetLeftPart(UriPartial.Authority)
+            && uri.UserInfo.Length == 0 && (uri.Scheme == "https" || (uri.Scheme == "http" && uri.IsLoopback));
+
+        private static bool IsDirectMediaUrl(string? value, string origin, string job) =>
+            Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && value == origin + "/direct/media/" + job + "/index.m3u8" + uri.Query
+            && Regex.IsMatch(uri.Query, @"^\?grant=[A-Za-z0-9._~-]+$");
+
+        private string RewriteAddresses(string text, string? directOrigin)
         {
             if (directOrigin is not null) text = text.Replace(directOrigin, Origin, StringComparison.Ordinal);
             return text.Replace(upstream.GetLeftPart(UriPartial.Authority), Origin, StringComparison.Ordinal);

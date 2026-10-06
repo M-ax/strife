@@ -34,6 +34,8 @@ On macOS, extract the ZIP and move `Strife.app` to Applications (macOS 14 or new
 
 See [release build instructions](docs/releases.md) for native dependencies, local builds, runtime packages, signing, and validation.
 
+Helltube server attachment downloads appear in a **Downloads** panel, collapsed along the bottom by default. Expand it to see progress, cancel an active transfer, open the downloads folder, or clear finished entries. The panel docks and floats like the other panels. Files are saved in the Strife profile's `downloads` folder; duplicate names receive a numbered suffix. History lasts for the app session, while completed files remain on disk. Browser-generated blob downloads, external links, and fetch/XHR responses retain their existing browser behavior. This feature is included starting with preview.5.
+
 ## Connect
 
 1. Choose **Connect to server** and enter a Mumble/Murmur hostname, port, username, and optional password. Vanilla servers need no plugins or modifications.
@@ -45,7 +47,7 @@ See [release build instructions](docs/releases.md) for native dependencies, loca
 
 RNNoise is compiled in and selected by default in every new Strife profile, before audio starts. Later changes made in the native settings dialog persist. The status beneath the microphone controls reports the engine's actual setting. The audio wizard and certificate settings remain available in the menu. Native dialogs open above Strife; the underlying Mumble main window stays hidden, including after accepting settings.
 
-Chat messages go to the current voice channel. Incoming Mumble text and server notices preserve message line breaks without the native log's hidden spacer lines. URLs and named links are clickable and open through the system's browser or registered application. Embedded raster image attachments appear inline and scale to the chat pane. Unavailable, unsupported, or oversized attachments display a text placeholder; remote images and other rich HTML are not loaded in the desktop UI.
+Chat messages go to the current voice channel. Incoming Mumble text and server notices preserve message line breaks without the native log's hidden spacer lines. URLs and named links are clickable and open through the system's browser or registered application. Embedded raster image attachments appear inline and scale to the chat pane. Click an image (or focus it and press Enter or Space) to open the image viewer. Switch between fit-to-window and actual size, and close with Escape, Close, or a click outside the viewer. Linked attachments keep a separate **Open image link** action. Unavailable, unsupported, or oversized attachments display a text placeholder; remote images and other rich HTML are not loaded in the desktop UI.
 
 Timestamped log entries have subtle separators, with distinct colors for timestamps and Mumble user references. Open **Menu → Appearance** to choose the UI accent, timestamp, username, and chat link colors, plus independent chat and UI fonts. The chat font applies to both messages and the composer; the UI font applies to Strife's interface. Changes preview live, **Save appearance** keeps them across launches, and **Cancel** or **Esc** restores your saved appearance. **Reset defaults** previews the default colors and fonts, including the teal (`#00E0BB`) UI accent; save to keep the reset. Native Mumble dialogs and the embedded Helltube page retain their own appearance.
 
@@ -56,6 +58,14 @@ The browser-only preview needs local font permission. While waiting for that per
 Click a color swatch to open the **HSV** picker. Drag in the saturation/value area or use the hue, saturation, and value sliders. Arrow keys also adjust the area, with Shift for larger steps. Color text boxes accept 6-digit or 3-digit hex codes, with or without `#`, and CSS color names such as `coral` and `rebeccapurple`. You can select and copy the hex text, or use **Copy hex** in the picker. **Use color** applies it to your appearance draft; canceling the picker restores its starting color. Save appearance to keep the changes.
 
 Helltube permits framing by local desktop origins. Strife uses a separate loopback proxy origin to keep Helltube's login cookies working with remote servers and older deployments. HTTP, WebSockets, uploads and media remain served by Helltube; the proxy limits embedding to Strife's shell and forwards the original upstream Origin for authentication. Cookies are namespaced per upstream server, with HttpOnly and SameSite preserved; HTTPS remains verified on the connection to the upstream server. Browser permissions and WebView2 media capabilities still govern screen capture, DRM, and provider playback. No cross-service account linking or channel-to-room synchronization is assumed.
+
+Starting with preview.5, an updated Helltube server can negotiate direct-to-metal HLS playback. Manifests, encryption keys and segments then bypass the local proxy using short-lived, resource/session/origin-bound grants. Media requests omit credentials and reject redirects; login, API calls, signaling, uploads and downloads stay on the proxy. Older servers keep the existing media route. This removes the HTTP detour, not encoder/player buffering or WebRTC relay latency. See [the direct-media contract and verification](docs/direct-metal-streaming.md).
+
+## Helltube embed and native sharing (development)
+
+With an updated Helltube server, Strife uses a dedicated desktop embed and adds room selection and video mute controls outside the frame. A Windows x64 development helper can handle Helltube's **Share desktop** action: choose a window or display in Strife and start sharing directly to that room. Publishing credentials are handled automatically and remain separate from standalone OBS tokens. Room changes, sign-out, reload, and closing Strife stop the stream.
+
+Build the helper with `./scripts/build-streaming.ps1` after preparing Helltube's pinned OBS SDK. It uses 720p30 H.264/Opus, video only by default, with optional system audio. Builds without the helper retain browser sharing. This feature is not in published installers yet; see [setup, limitations and protocol details](docs/helltube-embed.md).
 
 ## Import from Mumble
 

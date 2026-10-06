@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { PANEL_IDS, defaultLayout, restoreLayout, dockPanel, floatPanel, measureLayout, floatingRect } from '../../src/Strife.Desktop/wwwroot/layout-model.js';
 
 test('chat and user controls can dock on every side of rooms without losing panels', () => {
-  for (const id of ['chat', 'controls', 'video']) for (const side of ['top', 'bottom', 'left', 'right']) {
+  for (const id of ['chat', 'controls', 'video', 'downloads']) for (const side of ['top', 'bottom', 'left', 'right']) {
     const initial = defaultLayout(), next = dockPanel(initial, id, 'rooms', side);
     assert.deepEqual(restoreLayout(next), next);
     assert.deepEqual(initial, defaultLayout(), 'layout operations leave the previous layout intact');
@@ -21,11 +21,24 @@ test('every panel can float and return to an empty workspace', () => {
   assert.equal(layout.root, null);
   assert.deepEqual(restoreLayout(layout), layout);
   for (const [index, id] of PANEL_IDS.entries()) {
-    layout = dockPanel(layout, id, null, ['top', 'bottom', 'left', 'right'][index]);
+    layout = dockPanel(layout, id, null, ['top', 'bottom', 'left', 'right'][index % 4]);
     assert.deepEqual(restoreLayout(layout), layout);
   }
   assert.equal(layout.floating.length, 0);
-  assert.equal(measureLayout(layout, 900, 557).panels.size, 4);
+  assert.equal(measureLayout(layout, 900, 557).panels.size, PANEL_IDS.length);
+});
+
+test('downloads start collapsed and migrate without rearranging an existing workspace', () => {
+  const initial = defaultLayout();
+  assert.equal(initial.collapsed.downloads, true);
+  assert.equal(measureLayout(initial, 1480, 837).panels.get('downloads').height, 42);
+  const old = { ...initial, root: initial.root.first, collapsed: {chat: true} };
+  const saved = floatPanel(old, 'controls', {x: 100, y: 150, width: 300, height: 250});
+  const migrated = restoreLayout(saved);
+  assert.deepEqual(migrated.root.first, saved.root);
+  assert.deepEqual(migrated.floating, saved.floating);
+  assert.equal(migrated.collapsed.chat, true);
+  assert.equal(migrated.collapsed.downloads, true);
 });
 
 test('invalid saved layouts recover all panels and migrate legacy chat collapse', () => {
