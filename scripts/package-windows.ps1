@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)][string]$PublishDirectory,
     [string]$Version,
     [string]$InnoSetupCompiler,
-    [string]$PrerequisiteDirectory
+    [string]$PrerequisiteDirectory,
+    [switch]$PortableOnly
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-common.ps1')
@@ -11,6 +12,13 @@ $root = Split-Path $PSScriptRoot -Parent
 $Version = Get-StrifeVersion $Version
 $PublishDirectory = [IO.Path]::GetFullPath($PublishDirectory)
 if (!(Test-Path (Join-Path $PublishDirectory 'Strife.exe'))) { throw 'Publish Strife before packaging it.' }
+$release = Join-Path $root 'artifacts/release'
+New-Item -ItemType Directory -Force $release | Out-Null
+if ($PortableOnly) {
+    Compress-Archive -Path (Join-Path $PublishDirectory '*') -DestinationPath (Join-Path $release "Strife-$Version-win-x64.zip") -Force
+    Write-Host 'Created portable archive only; no installer was built.'
+    return
+}
 if (!$InnoSetupCompiler) {
     $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
     $candidates = @(
@@ -39,8 +47,6 @@ foreach ($name in $downloads.Keys) {
 $redistVersion = (Get-Item (Join-Path $prerequisites 'VC_redist.x64.exe')).VersionInfo.FileVersion
 $redistVersion = [regex]::Match($redistVersion, '\d+\.\d+\.\d+\.\d+').Value
 if (!$redistVersion) { throw 'Cannot determine the bundled Visual C++ runtime version.' }
-$release = Join-Path $root 'artifacts/release'
-New-Item -ItemType Directory -Force $release | Out-Null
 & $InnoSetupCompiler "/DAppVersion=$Version" "/DAppNumericVersion=$($Version.Split('-')[0]).0" "/DPublishDir=$PublishDirectory" "/DPrerequisiteDir=$prerequisites" "/DReleaseDir=$release" "/DVCRedistVersion=$redistVersion" (Join-Path $root 'packaging/windows/Strife.iss')
 if ($LASTEXITCODE) { throw 'Windows installer compilation failed.' }
 $installer = Join-Path $release "Strife-$Version-win-x64-Setup.exe"

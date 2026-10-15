@@ -2,6 +2,12 @@ using System.Text;
 using System.Text.Json;
 using Strife;
 
+if (args.Length == 3 && args[0] == "--capture-fixture")
+{
+    CaptureFixture.Run(args[1], args[2]);
+    return;
+}
+
 // Browser integration owns this process; no native voice engine or desktop is started.
 if (args.Length > 0 && args[0] == "--proxy-fixture")
 {
@@ -45,12 +51,38 @@ if (args.Contains("--voice-startup-only"))
 foreach (var value in new[] { "file:///C:/Windows", "javascript:alert(1)", "https://user:pass@example.com", "//example.com" })
     Reject(() => PreferencesStore.ValidateHelltubeUrl(value), "reject unsafe Helltube address " + value.Split(':')[0]);
 Check(PreferencesStore.ValidateHelltubeUrl("http://127.0.0.1:3000/path").Port == 3000, "local Helltube URL");
+var defaultQuality = StreamingQuality.Select(StreamingQuality.DefaultPreset);
+Check(defaultQuality is { Width: 1920, Height: 1080, Fps: 60, BitrateKbps: 8000 }
+    && defaultQuality.Label == "1080p60 8 Mbps", "native sharing defaults to 1080p60 8 Mbps");
+var publishing = System.Text.Json.Nodes.JsonNode.Parse("""{"version":1,"width":3840,"height":2160,"fps":60,"bitrateKbps":40000,"codec":"h264","profile":"baseline","level":"5.2"}""")!.AsObject();
+Check(StreamingQuality.Presets.Count(p => StreamingQuality.Supported(p, null)) == 5, "older servers expose five presets");
+Check(StreamingQuality.Select("4K60", publishing).BitrateKbps == 40000, "updated servers support 4K60 40 Mbps");
+var customQuality = System.Text.Json.Nodes.JsonNode.Parse("""{"width":1920,"height":1080,"fps":15,"bitrateKbps":2300}""")!.AsObject();
+Check(StreamingQuality.Select("custom", null, customQuality).Label == "1080p15 2.3 Mbps", "custom quality label and validation");
+foreach (var bitrate in new[] { 499, 2301, 40001 })
+{
+    var invalid = customQuality.DeepClone().AsObject(); invalid["bitrateKbps"] = bitrate;
+    Reject(() => StreamingQuality.Select("custom", publishing, invalid), "invalid custom bitrate is rejected");
+}
+foreach (var rate in new[] { 64, 96, 128, 160, 192 }) StreamingQuality.ValidateAudio(rate, null);
+foreach (var rate in new[] { 0, 65, 193 }) Reject(() => StreamingQuality.ValidateAudio(rate, null), "unsupported audio bitrate is rejected");
+Check(StreamingQuality.Describe()["presets"]!.AsArray().Count == 9, "picker includes gated high-resolution presets");
+foreach (var preset in StreamingQuality.Presets)
+{
+    Check(!preset.Label.Contains('@') && !preset.Label.Contains(':'), "quality label uses resolutionfps bitrate");
+    Check(StreamingQuality.Select(preset.Id, publishing) == preset, "enabled quality round-trips through catalog");
+    if (!StreamingQuality.Supported(preset, null)) Reject(() => StreamingQuality.Select(preset.Id), "reject high quality without server support");
+}
+foreach (var id in new string?[] { null, "", "unknown", "1080p60;command" })
+    Reject(() => StreamingQuality.Select(id), "reject missing or forged quality selection");
 Check(StreamingEngine.IngestAddress("https://video.example.com/saved", "lobby", "/api/whip/lobby", new string('a', 64),
     DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeMilliseconds()) == "https://video.example.com/api/whip/lobby", "WHIP destination derives from configured server");
 foreach (var path in new[] { "https://other.example.com/api/whip/lobby", "/api/whip/other", "/api/whip/lobby?token=secret" })
     Reject(() => StreamingEngine.IngestAddress("https://video.example.com", "lobby", path, new string('a', 64), long.MaxValue), "reject unbound WHIP destination");
 Reject(() => StreamingEngine.IngestAddress("http://video.example.com", "lobby", "/api/whip/lobby", new string('a', 64), long.MaxValue), "reject cleartext remote publishing token");
 Reject(() => StreamingEngine.IngestAddress("https://video.example.com", "lobby", "/api/whip/lobby", new string('a', 64), 0), "reject expired publishing token");
+Check(StreamingEngine.IngestAddress("https://video.example.com", "lobby", "/api/whip/lobby", new string('a', 64), null)
+    == "https://video.example.com/api/whip/lobby", "explicit null expiry supports server-revocable non-expiring sessions");
 var url = new Uri(PreferencesStore.MumbleUrl("::1", 64738, "a@b", "p/#?@"));
 Check(url.Host == "[::1]" && url.Port == 64738, "IPv6 Mumble address");
 Check(Uri.UnescapeDataString(url.UserInfo) == "a@b:p/#?@", "Mumble credentials round trip without URL injection");

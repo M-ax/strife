@@ -4,16 +4,56 @@
 
 This extends the [original bundled OBS / WHIP investigation](https://github.com/M-ax/strife/blob/8fc31932b1042f579125a4dd6365b4a30343aa8c/docs/obs-whip-investigation.md)
 and its [development implementation follow-up](https://github.com/M-ax/strife/blob/8fc31932b1042f579125a4dd6365b4a30343aa8c/docs/helltube-embed.md).
-Those documents exist at the recorded preview.5 revision, but not in this
-checkout's older baseline. This companion preserves that history without
-importing newer runtime code. Its audio and quality requirements supersede the
+Those links preserve the recorded preview.5 baseline; the current
+[development integration guide](helltube-embed.md) tracks implementation.
+This plan's audio and quality requirements supersede the
 original proposal to defer 1080p and leave application audio unspecified.
 
 Retain the separate, minimal libobs helper, selected-room credential handoff,
 WHIP transport, and independent Mumble process/cache. The recorded Windows
 prototype uses fixed 720p30 / 3 Mbps x264 video and optional 128 Kbps system audio.
 It has no application-audio picker or preview and is excluded from preview.5
-installers. Everything below is planned work, not a claim of shipped support.
+installers. Everything below is planned work unless noted in the implementation
+status; none of these additions is a claim of shipped installer support.
+
+### Implementation status
+
+The Windows development helper now implements all nine presets through
+**4K60 40 Mbps**, with **1080p60 8 Mbps** as default. High presets require the
+new Helltube capability contract, checked both when rendering options and against
+the returned credential before publishing. Older servers retain five presets.
+The helper advertises its actual H.264 SPS profile/level; Strife-purpose WHIP
+routers support level 5.2. Rebuild older helpers for quality v3/preview v1/audio v1.
+
+The picker separates Screens/Windows with search and refresh, plus Automatic
+or Manual audio. Windows audio is pinned to a concrete output or an identified
+application process tree. No audio sends no audio track. Audio loss latches
+mute without fallback; closing the captured window stops sharing. Random
+enumeration IDs prevent stale choices from selecting replacement targets.
+Browser/native tests cover decoded 1440p/4K video, selected-versus-excluded
+application tones, and a real window with automatic application audio.
+
+The Windows helper now also has local live preview, paged on-demand thumbnails,
+audio peak meters, custom video/audio quality, source-sized output without
+upscaling, and runtime-probed hardware selection. NVENC and AMF are exercised on
+the development machine; Quick Sync is exposed only when its local probe succeeds.
+Development packaging validates file provenance and startup without an OBS SDK
+on PATH. A bounded high-motion soak mode records local decoder throughput.
+
+Still blocked/outstanding: macOS/Linux native implementations and platform builds,
+VideoToolbox/Linux hardware paths, broad device/HDR/permission testing,
+restrictive networks, multi-viewer capacity, full corresponding-source/license
+materials, clean-machine certification, and installer lifecycle validation.
+The current Windows host has no Inno Setup compiler; its WSL Ubuntu environment
+does not have the pinned OBS development dependencies, and no macOS runner has
+been supplied. Development-only portable packaging does not close those gates.
+
+The attached Helltube revision `44d5e80` has removed WHIP bitrate caps since the
+original investigation. The new Helltube changes add room-scoped capability
+discovery and Strife's level-5.2 router without reintroducing a global bitrate
+cap or changing standalone OBS behavior. The 40 Mbps limit is enforced by
+Strife's quality selection/helper, not a server-wide bandwidth quota.
+Deployment capacity controls remain separate release work.
 
 ## Application audio: platform findings
 

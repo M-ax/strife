@@ -58,11 +58,39 @@ if (!strife_same_origin(endpoint_url, url)) {
 }
 resource_url = url;
 '@)
+$codecAnchor = 'video_description.addH264Codec(video_payload_type);'
+if (!$outputCode.Contains($codecAnchor)) { throw 'Pinned WHIP H.264 patch anchor missing.' }
+$outputCode = $outputCode.Replace('#include "whip-output.h"', "#include `"whip-output.h`"`n#include <obs-avc.h>`n#include <util/bmem.h>")
+$outputCode = $outputCode.Replace($codecAnchor, @'
+// Strife validates an actual locally encoded packet before issuing credentials.
+// Hardware SPS may not exist again until the publishing encoder emits a packet.
+const std::string profile = obs_data_get_string(settings, "strife_profile_level_id");
+if (profile.size() != 6 || profile.substr(0, 2) != "42" ||
+    !std::all_of(profile.begin(), profile.end(), [](unsigned char c) { return std::isxdigit(c); }))
+    throw std::runtime_error("Missing validated H.264 encoder profile/level.");
+video_description.addH264Codec(video_payload_type,
+    std::string("profile-level-id=") + profile + ";packetization-mode=1;level-asymmetry-allowed=1");
+'@)
 [IO.File]::WriteAllText($outputFile, $outputCode)
+$wasapi = Join-Path $build 'wasapi'
+New-Item -ItemType Directory -Force $wasapi | Out-Null
+foreach ($name in @('win-wasapi.cpp','wasapi-notify.cpp','wasapi-notify.hpp','enum-wasapi.cpp','enum-wasapi.hpp','plugin-main.cpp')) {
+    $content = & git -C $ObsSource show "${revision}:plugins/win-wasapi/$name"
+    if ($LASTEXITCODE) { throw "Cannot read pinned WASAPI source $name" }
+    [IO.File]::WriteAllText((Join-Path $wasapi $name), ($content -join "`n") + "`n")
+}
+$audioFile = Join-Path $wasapi 'win-wasapi.cpp'
+$audioCode = [IO.File]::ReadAllText($audioFile)
+$windowLookup = 'hwnd = ms_find_window\(INCLUDE_MINIMIZED, priority, window_class\.c_str\(\), title\.c_str\(\),\s*executable\.c_str\(\)\);'
+if ([regex]::Matches($audioCode, $windowLookup).Count -ne 1) { throw 'Pinned WASAPI identity patch anchor missing.' }
+$audioCode = "#include `"wasapi-pin.hpp`"`n" + [regex]::Replace($audioCode, $windowLookup, 'hwnd = strifeAudioWindow(source);')
+[IO.File]::WriteAllText($audioFile, $audioCode)
+[IO.File]::AppendAllText((Join-Path $wasapi 'plugin-main.cpp'), "`nextern `"C`" __declspec(dllexport) int strife_audio_identity_version() { return 1; }`n")
+[IO.File]::AppendAllText((Join-Path $whip 'obs-webrtc.cpp'), "`nextern `"C`" __declspec(dllexport) int strife_whip_quality_version() { return 3; }`n")
 # The OBS SDK must first be configured using Helltube's obs:setup / upstream CMake preset.
-& $cmake --build (Join-Path $ObsSource 'build_x64') --config RelWithDebInfo --target libobs libobs-d3d11 libobs-winrt obs-x264 obs-ffmpeg win-capture win-wasapi --parallel 4
+& $cmake --build (Join-Path $ObsSource 'build_x64') --config RelWithDebInfo --target libobs libobs-d3d11 libobs-winrt obs-x264 obs-ffmpeg obs-nvenc obs-qsv11 win-capture win-wasapi --parallel 4
 if ($LASTEXITCODE) { throw 'OBS dependencies failed to build.' }
-& $cmake -S (Join-Path $root 'streaming') -B $build -G 'Visual Studio 18 2026' -A x64 "-DOBS_SOURCE=$ObsSource" "-DWHIP_SOURCE=$whip"
+& $cmake -S (Join-Path $root 'streaming') -B $build -G 'Visual Studio 18 2026' -A x64 "-DOBS_SOURCE=$ObsSource" "-DWHIP_SOURCE=$whip" "-DWASAPI_SOURCE=$wasapi"
 if ($LASTEXITCODE) { throw 'Streaming configure failed.' }
 & $cmake --build $build --config RelWithDebInfo --parallel 4
 if ($LASTEXITCODE) { throw 'Streaming build failed.' }
@@ -74,14 +102,18 @@ if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination
 New-Item -ItemType Directory -Force "$destination/bin/64bit", "$destination/obs-plugins/64bit", "$destination/data/obs-plugins" | Out-Null
 Copy-Item -LiteralPath "$build/RelWithDebInfo/strife-stream.exe" -Destination "$destination/bin/64bit"
 Copy-Item -LiteralPath "$build/RelWithDebInfo/obs-webrtc.dll" -Destination "$destination/obs-plugins/64bit"
-$plugins = @('obs-webrtc','obs-x264','obs-ffmpeg','win-capture','win-wasapi')
+Copy-Item -LiteralPath "$build/RelWithDebInfo/win-wasapi.dll" -Destination "$destination/obs-plugins/64bit"
+$plugins = @('obs-webrtc','obs-x264','obs-ffmpeg','obs-nvenc','obs-qsv11','win-capture','win-wasapi')
 foreach ($plugin in $plugins) {
-    if ($plugin -ne 'obs-webrtc') { Copy-Item -LiteralPath "$runtime/obs-plugins/64bit/$plugin.dll" -Destination "$destination/obs-plugins/64bit" }
+    if ($plugin -notin @('obs-webrtc','win-wasapi')) { Copy-Item -LiteralPath "$runtime/obs-plugins/64bit/$plugin.dll" -Destination "$destination/obs-plugins/64bit" }
     Copy-Item -LiteralPath "$runtime/data/obs-plugins/$plugin" -Destination "$destination/data/obs-plugins" -Recurse
 }
 Copy-Item -LiteralPath "$runtime/data/libobs" -Destination "$destination/data" -Recurse
 # libobs-winrt is dynamically loaded. Capture helper EXEs/DLLs are retained in plugin data.
 foreach ($name in @('libobs-d3d11.dll','libobs-winrt.dll')) { Copy-Item -LiteralPath "$runtime/bin/64bit/$name" -Destination "$destination/bin/64bit" }
+foreach ($name in @('obs-amf-test.exe','obs-nvenc-test.exe','obs-qsv-test.exe')) {
+    Copy-Item -LiteralPath "$runtime/bin/64bit/$name" -Destination "$destination/bin/64bit"
+}
 $pending = [Collections.Generic.Queue[string]]::new()
 Get-ChildItem -LiteralPath $destination -Recurse -File | Where-Object Extension -in @('.exe','.dll') | ForEach-Object { $pending.Enqueue($_.FullName) }
 $seen = @{}
