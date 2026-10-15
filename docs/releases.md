@@ -13,6 +13,26 @@ All four native builds must succeed before any assets are attached. Rerunning th
 
 The ZIP/tar archives include .NET, the voice engine, UI assets and dependency notices. The Windows portable ZIP needs WebView2 and the VC++ runtime already installed; the setup executable embeds both standalone redistributables for offline installation. Their Microsoft Authenticode signatures are verified during packaging. The installer checks runtime presence/version, reports prerequisite failures, handles restart requests, provides shortcuts and Apps & Features registration, removes obsolete runtime files on upgrade, rejects numeric version downgrades, and preserves profiles on uninstall.
 
+## Preview 0.1.0-preview.6
+
+This release refreshes the managed host, web UI, streaming integration, and
+packaging checks while preserving the published browser-sharing experience.
+The source tree now includes Windows native streaming previews/thumbnails,
+application-audio selection and meters, custom quality through 4K60 / 40 Mbps,
+source-sized output, and locally probed hardware encoders. These features require
+the separately built development helper and a matching Helltube server.
+
+The standard installers and archives **do not bundle the OBS helper**.
+Windows, Linux, and macOS downloads continue to use browser sharing; Linux/macOS
+native streamers are deferred. Development-only portable packaging is opt-in,
+not a feature claim for the advertised downloads. Existing direct HLS playback,
+Downloads, chat-image viewing, and embed controls remain available.
+
+Build all five advertised packages from this release's exact commit using the
+unchanged pinned Mumble caches. Runtime requirements and signing limitations are
+unchanged. Upload the complete validated package set to R2 before deploying the
+new website manifest, then verify every production download.
+
 ## Preview 0.1.0-preview.5
 
 This release adds secure direct-to-metal HLS playback with an updated Helltube server, avoiding Strife's local HTTP proxy for manifests, keys and media segments. Login, API requests, signaling, uploads and downloads retain the isolated proxy path; older Helltube servers remain compatible. Direct grants are scoped to the media job, active session and exact iframe origin, expire after ten minutes, and renew without relying on the desktop wall clock. Media requests omit cookies and reject redirects.
@@ -39,6 +59,14 @@ The platform requirements, prerequisite bundles, and signing status above are un
 Release jobs first restore the complete compiled voice payload for their platform, including its libraries, resources and license notices. On an exact cache hit they skip the Mumble checkout, native compiler toolchain restore, build-tool installation and C++ compilation. Linux still installs runtime libraries needed to launch the packaged app and engine. Managed/web tests, packaging, native startup checks and Windows installer checks run on every release, including cache hits.
 
 The cache key depends only on the runtime, the native bridge, the native build/preparation scripts and the pinned dependency manifest. App versions, desktop C# and web UI changes, documentation, packaging scripts and workflow edits do not invalidate it. The current key format is preserved so the engines built for preview.3 can be reused immediately. The workflow's job summary states whether it reused Mumble or rebuilt it.
+
+If GitHub evicts a compiled cache, the workflow can recover the unchanged engine
+from the validated Actions run pinned in `packaging/voice-release.json`. Recovery
+requires an exact match of every native cache input against that release's source
+commit, the pinned archive SHA-256, the runtime, and the Mumble revision. Missing
+or expired donor artifacts fall back to the normal native build; mismatched
+archives fail rather than silently being trusted. Recovered engines repopulate
+the same compiled cache key and still undergo all package/startup checks.
 
 Treat Mumble and its integration as a stable native dependency: implement normal app behavior in the managed host or web UI. Changes to the bridge, native build recipe or pinned dependencies intentionally require a fresh engine; never reuse an older binary under a changed native key. A missing or evicted cache also rebuilds and saves the pinned engine automatically. Caches populated on `main` can be reused by release tags and other branches under [GitHub's cache access rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
 
