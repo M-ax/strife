@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 namespace Strife;
 
 public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voice, Uri origin, Action<string> publish,
-    Action? close = null, Func<string, Task<string>>? loadVideo = null) : IDisposable
+    Action? close = null, Func<string, Task<string>>? loadVideo = null, StreamingEngine? streaming = null, DownloadManager? downloads = null) : IDisposable
 {
     public string Token { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private readonly SemaphoreSlim gate = new(1);
@@ -39,6 +39,9 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
             }
             else if (command == "ready")
             {
+                downloads?.Publish();
+                if (streaming is not null) await streaming.StopAsync();
+                Send(new { type = "streaming", available = streaming?.Available == true });
                 Send(new { type = "preferences", value = preferences.Current,
                     videoUrl = loadVideo is null ? preferences.Current.HelltubeUrl : await loadVideo(preferences.Current.HelltubeUrl) });
                 if (voice.LastState is { } state) publish(state.GetRawText());
@@ -52,11 +55,32 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
                 Send(new { type = "engine", ready = true });
                 Send(new { type = "result", id, ok = true });
             }
+            else if (command is "downloadCancel" or "downloadsClear" or "downloadsFolder" && downloads is not null)
+            {
+                if (command == "downloadCancel") downloads.Cancel(message["downloadId"]!.GetValue<string>());
+                else if (command == "downloadsClear") downloads.Clear();
+                else downloads.OpenFolder();
+                Send(new { type = "result", id, ok = true });
+            }
             else if (command == "fonts")
                 Send(new { type = "result", id, ok = true, batch = SystemFontCatalog.Shared.Read(message["offset"]?.GetValue<int>() ?? 0) });
+            else if (command == "streamSources" && streaming is not null)
+                Send(new { type = "result", id, ok = true, value = await streaming.SourcesAsync(message["shareId"]!.GetValue<string>()) });
+            else if (command == "streamStart" && streaming is not null)
+                Send(new { type = "result", id, ok = true, value = await streaming.StartAsync(message["shareId"]!.GetValue<string>(),
+                    message["sourceId"]!.GetValue<string>(), message["audio"]?.GetValue<bool>() == true,
+                    preferences.Current.HelltubeUrl, message["credential"]!.AsObject()) });
+            else if (command == "streamStatus" && streaming is not null)
+                Send(new { type = "result", id, ok = true, value = await streaming.StatusAsync() });
+            else if (command == "streamStop" && streaming is not null)
+            {
+                await streaming.StopAsync();
+                Send(new { type = "result", id, ok = true });
+            }
             else if (command == "preferences")
             {
                 var url = message["helltubeUrl"]?.GetValue<string>() ?? preferences.Current.HelltubeUrl;
+                if (url != preferences.Current.HelltubeUrl && streaming is not null) await streaming.StopAsync();
                 preferences.Save(preferences.Current with
                 {
                     HelltubeUrl = PreferencesStore.ValidateHelltubeUrl(url).AbsoluteUri,

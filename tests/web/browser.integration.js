@@ -279,7 +279,7 @@ async function checkChannelTree(page) {
 
 test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube isolation', async () => {
   const video = createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<h1>Helltube fixture</h1><input placeholder="Room name">'); });
-  const assets = new Map(['index.html', 'app.js', 'chat.js', 'appearance.js', 'font-picker.js', 'color-picker.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
+  const assets = new Map(['index.html', 'app.js', 'downloads.js', 'sharing.js', 'helltube-embed.js', 'chat.js', 'appearance.js', 'font-picker.js', 'color-picker.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
   const server = createServer(async (req, res) => {
     const file = assets.get(req.url);
     if (!file) { res.writeHead(404); res.end(); return; }
@@ -370,6 +370,23 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     await page.frameLocator('#helltube').getByRole('heading', { name: 'Helltube fixture' }).waitFor();
     assert.equal(await page.locator('.channel-user.talking').count(), 1);
     assert.equal(await page.locator('#self-name').textContent(), 'Alice');
+    assert.equal(await page.locator('#downloads-content').isVisible(), false);
+    await page.evaluate(() => window.deliver({type: 'downloads', directory: 'fixture downloads', items: [
+      {id: 'fixture-download', name: '<script>clip.mp4', bytes: 512, total: 1024, state: 'downloading'}
+    ]}));
+    assert.equal(await page.locator('.download-summary').textContent(), '1 downloading');
+    assert.equal(await page.locator('#downloads-content').isVisible(), false, 'downloads do not interrupt by expanding the panel');
+    await page.getByRole('button', {name: 'Expand Downloads', exact: true}).click();
+    assert.equal(await page.locator('#download-list strong').textContent(), '<script>clip.mp4');
+    assert.equal(await page.locator('#download-list progress').getAttribute('value'), '512');
+    await page.getByRole('button', {name: 'Cancel <script>clip.mp4', exact: true}).click();
+    assert.equal(await page.evaluate(() => window.commands.at(-1).downloadId), 'fixture-download');
+    await page.evaluate(() => window.deliver({type: 'downloads', directory: 'fixture downloads', items: [
+      {id: 'fixture-download', name: 'clip.mp4', bytes: 1024, total: 1024, state: 'completed'}
+    ]}));
+    assert.equal(await page.locator('#download-list progress').isVisible(), false);
+    assert.equal(await page.locator('#downloads-clear').isEnabled(), true);
+    await page.getByRole('button', {name: 'Collapse Downloads', exact: true}).click();
     await checkAppearance(page);
     await checkChannelTree(page);
     await page.evaluate(() => window.deliver({ type: 'state', connected: true, session: 7,
@@ -457,7 +474,35 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     assert.ok(imageLayout.overflow <= 1);
     assert.ok(imageLayout.bottom <= 1, 'image dimensions keep new messages scrolled into view');
     assert.equal(await page.evaluate(() => window.pwned), undefined);
-    await page.locator('#chat-log a img').click();
+    const thumbnail = page.locator('#chat-log .chat-image-button').first();
+    await thumbnail.click();
+    const viewer = page.getByRole('dialog', { name: 'Chat image viewer' });
+    await viewer.waitFor();
+    await page.waitForFunction(() => document.querySelector('.chat-image-viewer img')?.naturalWidth === 1200);
+    assert.equal(await viewer.locator('img').getAttribute('src'), await thumbnail.locator('img').getAttribute('src'));
+    assert.equal(await page.evaluate(() => window.commands.filter(m => m.command === 'openLink').length), opened.length);
+    assert.equal(await viewer.getByRole('button', { name: 'Close image viewer' }).evaluate(el => el === document.activeElement), true);
+    const fitted = await viewer.locator('img').boundingBox();
+    const stage = await viewer.locator('.chat-image-stage').boundingBox();
+    assert.ok(fitted.width <= stage.width && fitted.height <= stage.height);
+    await viewer.getByRole('button', { name: 'Actual size', exact: true }).click();
+    assert.equal((await viewer.locator('img').boundingBox()).width, 1200);
+    await viewer.getByRole('button', { name: 'Fit to window', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await viewer.waitFor({ state: 'detached' });
+    assert.equal(await thumbnail.evaluate(el => el === document.activeElement), true);
+    await page.keyboard.press('Enter');
+    await viewer.waitFor();
+    await page.evaluate(() => window.deliver({ ...window.imageLog, text: window.imageLog.text + '\nViewer stays open' }));
+    assert.equal(await viewer.isVisible(), true);
+    await viewer.getByRole('button', { name: 'Close image viewer' }).click();
+    await viewer.waitFor({ state: 'detached' });
+    assert.equal(await thumbnail.evaluate(el => el === document.activeElement), true);
+    await page.keyboard.press('Space');
+    await viewer.waitFor();
+    await page.mouse.click(1, 1);
+    await viewer.waitFor({ state: 'detached' });
+    await page.getByRole('link', { name: 'Open image link', exact: true }).click();
     assert.equal(await page.evaluate(() => window.commands.filter(m => m.command === 'openLink').at(-1).url),
       'https://example.com/photo');
     await page.evaluate(() => {

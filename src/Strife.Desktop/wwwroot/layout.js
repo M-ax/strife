@@ -1,6 +1,6 @@
 import { PANEL_IDS, BAR, GAP, defaultLayout, restoreLayout, dockPanel, floatPanel, floatingRect, measureLayout, containsPanel } from './layout-model.js';
 
-const titles = { rooms: 'Mumble rooms', chat: 'Voice chat', controls: 'User controls', video: 'Helltube' };
+const titles = { rooms: 'Mumble rooms', chat: 'Voice chat', controls: 'User controls', video: 'Helltube', downloads: 'Downloads' };
 const collapseNames = { ...titles, chat: 'chat' };
 const sides = ['top', 'bottom', 'left', 'right'];
 const HEADER_REVEAL_DISTANCE = 30;

@@ -13,6 +13,14 @@ All four native builds must succeed before any assets are attached. Rerunning th
 
 The ZIP/tar archives include .NET, the voice engine, UI assets and dependency notices. The Windows portable ZIP needs WebView2 and the VC++ runtime already installed; the setup executable embeds both standalone redistributables for offline installation. Their Microsoft Authenticode signatures are verified during packaging. The installer checks runtime presence/version, reports prerequisite failures, handles restart requests, provides shortcuts and Apps & Features registration, removes obsolete runtime files on upgrade, rejects numeric version downgrades, and preserves profiles on uninstall.
 
+## Preview 0.1.0-preview.5
+
+This release adds secure direct-to-metal HLS playback with an updated Helltube server, avoiding Strife's local HTTP proxy for manifests, keys and media segments. Login, API requests, signaling, uploads and downloads retain the isolated proxy path; older Helltube servers remain compatible. Direct grants are scoped to the media job, active session and exact iframe origin, expire after ten minutes, and renew without relying on the desktop wall clock. Media requests omit cookies and reject redirects.
+
+The desktop also adds a dockable Downloads panel for server attachment downloads, a keyboard-accessible chat image viewer, and room/video-mute controls for Helltube's dedicated desktop embed. The optional OBS-based native sharing helper remains development-only and is **not included** in these packages; browser sharing remains available. See [direct media](direct-metal-streaming.md) and [native sharing limitations](helltube-embed.md).
+
+All five advertised packages are built from the same source commit using the unchanged pinned Mumble payloads. Platform requirements, bundled prerequisites and signing status are unchanged. Publish the validated packages to R2 before deploying the updated website manifest, and verify every production download.
+
 ## Preview 0.1.0-preview.4
 
 This release adds a teal default accent and matching icons, appearance settings for UI/chat colors and fonts, installed-font discovery, an HSV color picker, and clearer timestamped chat messages. User controls use a fixed 240px height when stacked and fill the available height when alone in a column. Platform requirements and signing status are unchanged.

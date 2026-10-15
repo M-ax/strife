@@ -2,6 +2,27 @@ using System.Text;
 using System.Text.Json;
 using Strife;
 
+// Browser integration owns this process; no native voice engine or desktop is started.
+if (args.Length > 0 && args[0] == "--proxy-fixture")
+{
+    if (args.Length != 3) throw new ArgumentException("Usage: --proxy-fixture <upstream> <shell-origin>");
+    var upstream = PreferencesStore.ValidateHelltubeUrl(args[1]);
+    var shell = PreferencesStore.ValidateHelltubeUrl(args[2]);
+    if (!upstream.IsLoopback || !shell.IsLoopback) throw new ArgumentException("Fixture origins must be loopback.");
+    await using var proxy = new HelltubeProxy(shell);
+    var fixtureUrl = await proxy.LoadAsync(upstream.AbsoluteUri);
+    Console.WriteLine(JsonSerializer.Serialize(new { proxyFixture = fixtureUrl }));
+    Console.Out.Flush();
+    // EOF is the normal shutdown signal; the deadline bounds an abandoned fixture.
+    using var lifetime = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+    try
+    {
+        while (await Console.In.ReadLineAsync(lifetime.Token) is not null) { }
+    }
+    catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+    return;
+}
+
 var directory = Path.Combine(Path.GetTempPath(), "strife-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(directory);
 var count = 0;
@@ -24,6 +45,12 @@ if (args.Contains("--voice-startup-only"))
 foreach (var value in new[] { "file:///C:/Windows", "javascript:alert(1)", "https://user:pass@example.com", "//example.com" })
     Reject(() => PreferencesStore.ValidateHelltubeUrl(value), "reject unsafe Helltube address " + value.Split(':')[0]);
 Check(PreferencesStore.ValidateHelltubeUrl("http://127.0.0.1:3000/path").Port == 3000, "local Helltube URL");
+Check(StreamingEngine.IngestAddress("https://video.example.com/saved", "lobby", "/api/whip/lobby", new string('a', 64),
+    DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeMilliseconds()) == "https://video.example.com/api/whip/lobby", "WHIP destination derives from configured server");
+foreach (var path in new[] { "https://other.example.com/api/whip/lobby", "/api/whip/other", "/api/whip/lobby?token=secret" })
+    Reject(() => StreamingEngine.IngestAddress("https://video.example.com", "lobby", path, new string('a', 64), long.MaxValue), "reject unbound WHIP destination");
+Reject(() => StreamingEngine.IngestAddress("http://video.example.com", "lobby", "/api/whip/lobby", new string('a', 64), long.MaxValue), "reject cleartext remote publishing token");
+Reject(() => StreamingEngine.IngestAddress("https://video.example.com", "lobby", "/api/whip/lobby", new string('a', 64), 0), "reject expired publishing token");
 var url = new Uri(PreferencesStore.MumbleUrl("::1", 64738, "a@b", "p/#?@"));
 Check(url.Host == "[::1]" && url.Port == 64738, "IPv6 Mumble address");
 Check(Uri.UnescapeDataString(url.UserInfo) == "a@b:p/#?@", "Mumble credentials round trip without URL injection");
@@ -117,5 +144,7 @@ using (var stream = new MemoryStream(new byte[1024 * 1024 + 1]))
 }
 await ImportTests.Run(directory, Check);
 await ProxySmoke.Run(Check);
+await DownloadTests.Run(directory, Check);
 if (args.Contains("--native")) await NativeSmoke.Run(Check);
+if (args.Contains("--streaming")) await StreamingTests.Run(Check);
 Console.WriteLine($"{count} checks passed.");

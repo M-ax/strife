@@ -55,13 +55,34 @@
     <section id="video-pane" class="video-pane dock-panel" data-panel="video" aria-label="Helltube video sharing">
       <header class="panel-header"><div class="video-actions"><button id="reload-video" class="icon-button" aria-label="Reload Helltube">↻</button><button id="video-settings">Server ↗</button></div></header>
       <div id="video-content" class="video-content panel-body">
+      <div id="helltube-controls" class="helltube-controls" hidden><label for="helltube-room">Helltube room</label><select id="helltube-room"></select><button id="helltube-sound">Mute video</button></div>
+      <div id="sharing-bar" class="helltube-controls" hidden><span id="sharing-status" role="status"></span><button id="sharing-stop">Stop sharing</button></div>
       <div class="video-surface"><iframe id="helltube" title="Helltube watch-together interface" referrerpolicy="no-referrer" allow="autoplay; fullscreen; display-capture; clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-popups" allowfullscreen></iframe>
         <div id="video-welcome" class="video-welcome"><span class="large-play">▶</span><span class="eyebrow">BETTER IN COMPANY</span><h2>The same screen.<br>The same moment.</h2><p>Bring your Helltube server into the room.<br>Keep the conversation going alongside it.</p><button id="video-welcome-connect" class="primary">Connect Helltube ↗</button></div>
       </div>
       <footer class="video-footer"><span><span class="dot live"></span> <span id="video-address">Choose your Helltube server</span></span><button id="video-help" class="text-button">Connection help</button></footer>
       </div>
     </section>
+    <section id="downloads-pane" class="downloads-pane dock-panel" data-panel="downloads" aria-label="Downloads">
+      <header class="panel-header"></header>
+      <div id="downloads-content" class="downloads-content panel-body">
+        <div class="download-actions"><button id="downloads-folder">Open downloads folder</button><button id="downloads-clear" disabled>Clear finished</button></div>
+        <p id="download-directory" class="muted"></p>
+        <p id="download-empty" class="muted">No downloads this session. Helltube attachment downloads appear here.</p>
+        <ul id="download-list" aria-label="Downloaded files"></ul>
+      </div>
+    </section>
   </main>
+  <dialog id="sharing-dialog" aria-labelledby="sharing-title">
+    <form id="sharing-form"><h2 id="sharing-title">Share your screen.</h2>
+      <p>Destination: <strong id="sharing-room"></strong></p>
+      <label for="sharing-sources">Window or display<select id="sharing-sources"></select></label>
+      <label class="sharing-audio"><input id="sharing-audio" type="checkbox">Include system audio</label>
+      <p class="form-note">System audio includes other applications and voice chat. Helltube playback is muted while sharing. Your microphone stays in Mumble. Video uses 720p at 30 fps.</p>
+      <p id="sharing-error" role="alert"></p>
+      <div class="dialog-footer"><button id="sharing-cancel" type="button">Cancel</button><button id="sharing-start" class="primary" type="submit" disabled>Start sharing</button></div>
+    </form>
+  </dialog>
   <dialog id="connect-dialog">
     <form id="connect-form"><div class="dialog-heading"><span class="eyebrow">MUMBLE CONNECTION</span><button type="button" class="icon-button close-dialog" aria-label="Close">×</button></div><h2>Join the conversation.</h2><p class="muted">Connect to an existing Mumble / Murmur server.</p>
       <label id="saved-server-label" hidden>Saved server<select id="saved-server"><option value="">Enter server manually</option></select></label>

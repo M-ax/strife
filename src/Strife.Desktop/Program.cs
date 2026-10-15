@@ -40,7 +40,7 @@ public static class Program
         var address = server.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         var origin = new Uri(address + "/");
         var voice = new VoiceEngine(profile);
-        var video = new HelltubeProxy(origin);
+        var streaming = new StreamingEngine();
         var icon = Path.Combine(AppContext.BaseDirectory, "wwwroot", "assets", OperatingSystem.IsWindows() ? "strife.ico" : "strife.png");
         var app = new PhotinoApplication().SetIconPath(icon);
         var window = new PhotinoWindow().SetTitle("Strife").SetUseOsDefaultSize(false).SetSize(1480, 900).SetMinSize(900, 620)
@@ -56,7 +56,9 @@ public static class Program
                 if (!closing) window.SendWebMessage(message);
             });
         }
-        using var bridge = new DesktopBridge(preferences, voice, origin, Publish, () => app.Dispatcher.BeginInvoke(window.Close), video.LoadAsync);
+        using var downloads = new DownloadManager(Path.Combine(profile, "downloads"), Publish);
+        var video = new HelltubeProxy(origin, downloads);
+        using var bridge = new DesktopBridge(preferences, voice, origin, Publish, () => app.Dispatcher.BeginInvoke(window.Close), video.LoadEmbedAsync, streaming, downloads);
         voice.Message += message => Publish(message.GetRawText());
         voice.Stopped += error => Publish(System.Text.Json.JsonSerializer.Serialize(new { type = "engine", ready = false, error }));
         window.RegisterCreatedHandler((_, _) => voice.OwnerWindow = window.WindowHandle);
@@ -71,6 +73,8 @@ public static class Program
         finally
         {
             closing = true;
+            downloads.Dispose();
+            streaming.DisposeAsync().AsTask().GetAwaiter().GetResult();
             voice.DisposeAsync().AsTask().GetAwaiter().GetResult();
             video.DisposeAsync().AsTask().GetAwaiter().GetResult();
             server.StopAsync().GetAwaiter().GetResult();

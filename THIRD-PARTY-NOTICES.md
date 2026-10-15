@@ -1,5 +1,7 @@
 # Third-party notices
 
+- **OBS Studio / libobs** — GPL 2.0 or later. The optional Windows development streaming helper links libobs and selected OBS plugins; its source has the same license designation. The development payload includes OBS's COPYING and the helper/build-script source. Distributing it requires the full applicable dependency notices and corresponding source/build materials for the exact binaries; the experimental payload is not yet included in release packages. [OBS source](https://github.com/obsproject/obs-studio). See [native sharing development](docs/helltube-embed.md).
+
 - **Mumble** — BSD 3-Clause, The Mumble Developers. The native engine is built from the supplied source checkout. Its full license is copied to voice/MUMBLE-LICENSE. [Source](https://github.com/mumble-voip/mumble).
 - **RNNoise** — BSD 3-Clause, Jean-Marc Valin and contributors. The full license is copied to voice/RNNOISE-LICENSE. [Source](https://github.com/xiph/rnnoise).
 - **PhotinoX / PhotinoX.Native 5.3.0** — Apache 2.0. [Managed source](https://github.com/ivanvoyager/PhotinoX), [native source](https://github.com/ivanvoyager/PhotinoX.Native).
