@@ -50,3 +50,8 @@ An iframe grants autoplay, fullscreen, display capture, and clipboard write; it 
 ## Scope
 
 Release builds target Windows x64, Linux x64, and macOS x64/arm64 using native runners and pinned Mumble dependency environments. Each package contains its platform's voice engine and a self-contained .NET host. Native startup/IPC/RNNoise checks run on every target; the full dialog ownership and desktop integration suite remains Windows-specific. Audio devices, microphone permissions and global shortcuts need interactive platform testing (especially macOS Accessibility permissions and Linux Wayland restrictions). RNNoise is bundled, rather than downloaded at runtime. A normal server does not need a Strife-specific plugin or API. Native Mumble settings provide features beyond the compact desktop controls.
+
+The [bundled OBS application-audio and quality plan](obs-streaming-options.md)
+extends the later OBS investigation with platform-specific capture requirements
+and resolution/bitrate controls. It describes planned work, not capabilities of
+this checkout or published installers, and keeps streaming independent of Mumble.
