@@ -62,6 +62,21 @@ internal static class UpdateTests
         var source = new SignedUpdateSource(http, cache, "preview") { Manifest = manifest };
         await source.DownloadReleaseEntry(null!, manifest.Asset(), output, _ => { });
         check((await File.ReadAllBytesAsync(output)).SequenceEqual(package), "resumed update is complete and verified");
+        var large = new byte[4 * 1024 * 1024];
+        var largePath = Path.Combine(directory, "hash-context.nupkg");
+        await File.WriteAllBytesAsync(largePath, large);
+        var largeManifest = manifest with { Bytes = large.Length, Sha256 = Convert.ToHexString(SHA256.HashData(large)).ToLowerInvariant() };
+        var context = new CountingContext();
+        var previousContext = SynchronizationContext.Current;
+        Task verification;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+            verification = largeManifest.VerifyPackageAsync(largePath);
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(previousContext); }
+        await verification;
+        check(context.Posts == 0, "exit verification never waits for the stopped UI dispatcher");
         foreach (var status in new[] { HttpStatusCode.Redirect, HttpStatusCode.NotFound })
         {
             using var rejected = new HttpClient(new Handler(_ => new(status)));
@@ -86,5 +101,15 @@ internal static class UpdateTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>
             Task.FromResult(respond(request));
+    }
+
+    private sealed class CountingContext : SynchronizationContext
+    {
+        public int Posts;
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            Interlocked.Increment(ref Posts);
+            base.Post(callback, state);
+        }
     }
 }

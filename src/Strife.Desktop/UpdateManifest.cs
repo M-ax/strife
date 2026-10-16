@@ -59,8 +59,8 @@ public sealed record UpdateManifest(int Schema, string Channel, string Version, 
 
     public async Task VerifyPackageAsync(string path, CancellationToken token = default)
     {
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 131072, true);
-        if (stream.Length != Bytes || !Convert.ToHexString(await SHA256.HashDataAsync(stream, token))
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 131072, true);
+        if (stream.Length != Bytes || !Convert.ToHexString(await SHA256.HashDataAsync(stream, token).ConfigureAwait(false))
             .Equals(Sha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Update package verification failed.");
     }
