@@ -1,8 +1,12 @@
-param([Parameter(Mandatory)][ValidateSet('win-x64', 'linux-x64', 'osx-x64', 'osx-arm64')][string]$Runtime)
+param(
+    [Parameter(Mandatory)][ValidateSet('win-x64', 'linux-x64', 'osx-x64', 'osx-arm64')][string]$Runtime,
+    [string]$PublishDirectory
+)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path $PSScriptRoot -Parent
-$version = (Get-Content (Join-Path $root 'artifacts/Strife/release.json') -Raw | ConvertFrom-Json).version
+if (!$PublishDirectory) { $PublishDirectory = Join-Path $root 'artifacts/Strife' }
+$version = (Get-Content (Join-Path $PublishDirectory 'release.json') -Raw | ConvertFrom-Json).version
 $stage = Join-Path $root 'artifacts/package-test'
 Reset-StrifeStagingDirectory $stage
 $previousEngine = $env:STRIFE_VOICE_ENGINE
@@ -10,6 +14,11 @@ try {
     if ($IsWindows) {
         Expand-Archive (Join-Path $root "artifacts/release/Strife-$version-$Runtime.zip") $stage
         $env:STRIFE_VOICE_ENGINE = Join-Path $stage 'voice/strife-voice.exe'
+        $releaseInfo = Get-Content (Join-Path $stage 'release.json') -Raw | ConvertFrom-Json
+        if ($releaseInfo.developmentStreaming) {
+            . (Join-Path $PSScriptRoot 'streaming-package.ps1')
+            Test-StrifeStreamingPayload -Directory (Join-Path $stage 'streaming') -Smoke
+        }
     } elseif ($IsMacOS) {
         & ditto -x -k (Join-Path $root "artifacts/release/Strife-$version-$Runtime.zip") $stage
         if ($LASTEXITCODE) { throw 'App archive extraction failed.' }

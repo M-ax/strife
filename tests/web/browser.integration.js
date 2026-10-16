@@ -279,7 +279,7 @@ async function checkChannelTree(page) {
 
 test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube isolation', async () => {
   const video = createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<h1>Helltube fixture</h1><input placeholder="Room name">'); });
-  const assets = new Map(['index.html', 'app.js', 'downloads.js', 'sharing.js', 'helltube-embed.js', 'chat.js', 'appearance.js', 'font-picker.js', 'color-picker.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
+  const assets = new Map(['index.html', 'app.js', 'downloads.js', 'sharing.js', 'sharing-quality.js', 'sharing-selection.js', 'helltube-embed.js', 'chat.js', 'appearance.js', 'font-picker.js', 'color-picker.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
   const server = createServer(async (req, res) => {
     const file = assets.get(req.url);
     if (!file) { res.writeHead(404); res.end(); return; }

@@ -5,6 +5,8 @@ param(
     [string]$Version,
     [string]$OutputDirectory,
     [string]$VoiceDirectory,
+    [switch]$IncludeDevelopmentStreaming,
+    [string]$StreamingDirectory,
     [switch]$NoPackage,
     [string]$InnoSetupCompiler,
     [string]$PrerequisiteDirectory
@@ -15,6 +17,13 @@ $root = Split-Path $PSScriptRoot -Parent
 if (!$Runtime) { $Runtime = Get-StrifeRuntime }
 if ($Runtime -ne (Get-StrifeRuntime)) { throw 'Publish on the target OS and architecture: the voice engine and packaging tools are native.' }
 $Version = Get-StrifeVersion $Version
+if ($StreamingDirectory -and !$IncludeDevelopmentStreaming) { throw 'StreamingDirectory requires -IncludeDevelopmentStreaming.' }
+if ($IncludeDevelopmentStreaming) {
+    if ($Runtime -ne 'win-x64' -or $Version -notmatch '-') { throw 'Development streaming requires a Windows prerelease package.' }
+    . (Join-Path $PSScriptRoot 'streaming-package.ps1')
+    $streaming = if ($StreamingDirectory) { [IO.Path]::GetFullPath($StreamingDirectory) } else { Join-Path $root 'artifacts/streaming' }
+    Test-StrifeStreamingPayload -Directory $streaming -Smoke
+}
 if ($BuildVoice) { & (Join-Path $PSScriptRoot 'build-voice.ps1') }
 $voice = if ($VoiceDirectory) { [IO.Path]::GetFullPath($VoiceDirectory) } else { Join-Path $root 'artifacts/voice' }
 $voiceExecutable = if ($IsWindows) { 'strife-voice.exe' } elseif ($IsMacOS) { 'StrifeVoice.app/Contents/MacOS/Mumble' } else { 'strife-voice' }
@@ -38,9 +47,14 @@ if ($IsMacOS) {
     & ditto $voice (Join-Path $output 'voice')
     if ($LASTEXITCODE) { throw 'Voice staging failed.' }
 } else { Copy-Item -LiteralPath $voice -Destination (Join-Path $output 'voice') -Recurse -Force }
+if ($IncludeDevelopmentStreaming) {
+    Copy-Item -LiteralPath $streaming -Destination (Join-Path $output 'streaming') -Recurse
+    Test-StrifeStreamingPayload -Directory (Join-Path $output 'streaming') -Smoke
+}
 Copy-Item (Join-Path $root 'README.md'), (Join-Path $root 'THIRD-PARTY-NOTICES.md') $output -Force
 Copy-Item (Join-Path $root 'docs') $output -Recurse -Force
-@{ version = $Version; runtime = $Runtime; voiceRevision = $buildInfo.revision } | ConvertTo-Json | Set-Content (Join-Path $output 'release.json')
+@{ version = $Version; runtime = $Runtime; voiceRevision = $buildInfo.revision;
+    developmentStreaming = [bool]$IncludeDevelopmentStreaming } | ConvertTo-Json | Set-Content (Join-Path $output 'release.json')
 if (!$NoPackage) {
     if ($IsWindows) {
         & (Join-Path $PSScriptRoot 'package-windows.ps1') -PublishDirectory $output -Version $Version -InnoSetupCompiler $InnoSetupCompiler -PrerequisiteDirectory $PrerequisiteDirectory

@@ -76,9 +76,29 @@
   <dialog id="sharing-dialog" aria-labelledby="sharing-title">
     <form id="sharing-form"><h2 id="sharing-title">Share your screen.</h2>
       <p>Destination: <strong id="sharing-room"></strong></p>
+      <label for="sharing-kind">Source type<select id="sharing-kind"><option value="screen">Screens</option><option value="window">Windows</option></select></label>
+      <label for="sharing-search">Find a source<input id="sharing-search" type="search" placeholder="Filter by name"></label>
       <label for="sharing-sources">Window or display<select id="sharing-sources"></select></label>
-      <label class="sharing-audio"><input id="sharing-audio" type="checkbox">Include system audio</label>
-      <p class="form-note">System audio includes other applications and voice chat. Helltube playback is muted while sharing. Your microphone stays in Mumble. Video uses 720p at 30 fps.</p>
+      <button id="sharing-refresh" type="button">Refresh sources</button>
+      <div class="sharing-thumb-controls"><button id="sharing-thumbnails-load" type="button">Load source thumbnails</button><button id="sharing-thumbnails-prev" type="button" aria-label="Previous source thumbnails">Previous</button><button id="sharing-thumbnails-next" type="button" aria-label="Next source thumbnails">Next</button></div>
+      <div id="sharing-thumbnails" class="sharing-thumbnails" aria-label="Source thumbnails"></div>
+      <figure class="sharing-preview"><img id="sharing-preview-image" alt="Live preview of the selected source" hidden><figcaption id="sharing-preview-description">Select a source to preview locally. Nothing is published until Start.</figcaption></figure>
+      <label for="sharing-quality">Video quality<select id="sharing-quality"></select></label>
+      <fieldset id="sharing-custom" hidden><legend>Custom quality</legend>
+        <label for="sharing-resolution">Maximum resolution<select id="sharing-resolution"><option value="854x480">480p</option><option value="1280x720">720p</option><option value="1920x1080" selected>1080p</option><option value="2560x1440">1440p</option><option value="3840x2160">4K</option></select></label>
+        <label for="sharing-fps">Frame rate<select id="sharing-fps"><option>15</option><option>30</option><option selected>60</option></select></label>
+        <label for="sharing-bitrate">Video bitrate (Kbps)<input id="sharing-bitrate" type="number" min="500" max="40000" step="100" value="8000"></label>
+      </fieldset>
+      <label for="sharing-encoder">Video encoder<select id="sharing-encoder"></select></label>
+      <p class="form-note">Encoders are probed locally and revalidated for the selected quality before publishing. Unavailable hardware stays disabled. Smaller sources are not upscaled.</p>
+      <p class="form-note">1440p and 4K require an updated Helltube server. 4K60 software encoding can be CPU intensive. Bitrates exclude audio and network overhead.</p>
+      <label class="sharing-audio"><input id="sharing-audio" type="checkbox">Include audio</label>
+      <label for="sharing-audio-mode">Audio selection<select id="sharing-audio-mode"><option value="automatic">Automatic</option><option value="manual">Manual</option></select></label>
+      <label for="sharing-audio-target">Audio application or output<select id="sharing-audio-target"></select></label>
+      <label for="sharing-audio-bitrate">Audio bitrate<select id="sharing-audio-bitrate"><option value="64">64 Kbps</option><option value="96">96 Kbps</option><option value="128" selected>128 Kbps</option><option value="160">160 Kbps</option><option value="192">192 Kbps</option></select></label>
+      <label for="sharing-audio-meter">Selected audio level<meter id="sharing-audio-meter" min="-60" max="0" value="-60"></meter></label>
+      <p id="sharing-audio-scope" class="form-note" aria-live="polite"></p>
+      <p class="form-note">Automatic uses system output for a screen, or application audio for a window. Application capture may include other windows or tabs. System audio includes other applications and voice chat. Helltube playback is muted while sharing. Your microphone stays in Mumble.</p>
       <p id="sharing-error" role="alert"></p>
       <div class="dialog-footer"><button id="sharing-cancel" type="button">Cancel</button><button id="sharing-start" class="primary" type="submit" disabled>Start sharing</button></div>
     </form>

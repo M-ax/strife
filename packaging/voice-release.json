@@ -1,0 +1,23 @@
+{
+  "sourceRef": "8fc31932b1042f579125a4dd6365b4a30343aa8c",
+  "runId": "37405009037",
+  "version": "0.1.0-preview.5",
+  "archives": {
+    "win-x64": {
+      "filename": "Strife-0.1.0-preview.5-win-x64.zip",
+      "sha256": "0bb5f631dfb322a8815a73ff308ad54c9f21b58af046eb31ab9a576dae8bf1df"
+    },
+    "linux-x64": {
+      "filename": "Strife-0.1.0-preview.5-linux-x64.tar.gz",
+      "sha256": "6628ea2054110c35afdf0b59de0d011c23106c3fe8c41262c4e5b185fc24d2e9"
+    },
+    "osx-arm64": {
+      "filename": "Strife-0.1.0-preview.5-osx-arm64.zip",
+      "sha256": "0d19ad94c83e025040d3e39c2b565a6999889b51c2932a5ff34442f77e029171"
+    },
+    "osx-x64": {
+      "filename": "Strife-0.1.0-preview.5-osx-x64.zip",
+      "sha256": "cda8ffe7db454b56c4b8022024f1e197d5326b6fc0ec20f7c032b7bcf6ffa9b2"
+    }
+  }
+}

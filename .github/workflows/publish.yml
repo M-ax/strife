@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: publish-${{ github.event.release.tag_name || github.ref }}
@@ -57,12 +58,37 @@ jobs:
         with:
           path: artifacts/voice
           key: voice-${{ matrix.runtime }}-${{ hashFiles('native/**', 'scripts/build-voice.ps1', 'scripts/prepare-release.ps1', 'packaging/native-dependencies.json') }}
+      - name: Check validated voice recovery source
+        if: steps.voice-cache.outputs.cache-hit != 'true'
+        id: voice-baseline
+        run: ./scripts/restore-voice-release.ps1 -Runtime '${{ matrix.runtime }}' -CheckOnly
+      - name: Download validated voice donor
+        if: steps.voice-baseline.outputs.eligible == 'true'
+        id: voice-donor
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.voice-baseline.outputs.artifact }}
+          run-id: ${{ steps.voice-baseline.outputs.run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts/voice-donor
+      - name: Recover unchanged compiled voice
+        if: steps.voice-donor.outcome == 'success'
+        id: voice-recovered
+        run: ./scripts/restore-voice-release.ps1 -Runtime '${{ matrix.runtime }}' -ArchiveDirectory artifacts/voice-donor
+      - name: Determine compiled voice availability
+        id: voice-ready
+        run: |
+          $available = '${{ steps.voice-cache.outputs.cache-hit }}' -eq 'true' -or '${{ steps.voice-recovered.outputs.restored }}' -eq 'true'
+          "available=$($available.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
       - name: Report Mumble cache result
         env:
           VOICE_CACHE_HIT: ${{ steps.voice-cache.outputs.cache-hit }}
         run: |
           if ($env:VOICE_CACHE_HIT -eq 'true') {
             $message = 'Reusing compiled Mumble (${{ matrix.runtime }}); skipping native source checkout, toolchain restore and compilation.'
+          } elseif ('${{ steps.voice-recovered.outputs.restored }}' -eq 'true') {
+            $message = 'Recovered unchanged Mumble (${{ matrix.runtime }}) from the hash-verified release archive; restoring the compiled cache without rebuilding native code.'
           } else {
             $message = 'No exact compiled Mumble cache (${{ matrix.runtime }}); building the pinned native inputs and caching the result.'
           }
@@ -86,14 +112,14 @@ jobs:
             libxcb-xinerama0 libxcb-xkb1 libxcb-shape0 libxcb-xinput0 \
             libxkbcommon-x11-0 libgl1 libopengl0 libegl1 xvfb xauth
       - name: Install Linux native build tools
-        if: runner.os == 'Linux' && steps.voice-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Linux' && steps.voice-ready.outputs.available != 'true'
         shell: bash
         run: |
           sudo apt-get install -y ninja-build pkg-config libasound2-dev libsm-dev \
             '^libxcb.*-dev' libx11-xcb-dev libglu1-mesa-dev libxrender-dev libxi-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libegl1-mesa-dev
       - name: Install macOS build tools
-        if: runner.os == 'macOS' && steps.voice-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'macOS' && steps.voice-ready.outputs.available != 'true'
         shell: bash
         run: brew install ninja xz
       - name: Install Windows packaging tools
@@ -107,16 +133,16 @@ jobs:
           $setup = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -WindowStyle Hidden -Wait -PassThru
           if ($setup.ExitCode -ne 0) { throw "Inno Setup installation failed: $($setup.ExitCode)" }
       - name: Restore native compiler toolchain
-        if: steps.voice-cache.outputs.cache-hit != 'true'
+        if: steps.voice-ready.outputs.available != 'true'
         uses: actions/cache@v5
         with:
           path: artifacts/build-env
           key: native-${{ matrix.runtime }}-${{ hashFiles('packaging/native-dependencies.json') }}
       - name: Fetch pinned native sources and toolchain
-        if: steps.voice-cache.outputs.cache-hit != 'true'
+        if: steps.voice-ready.outputs.available != 'true'
         run: ./scripts/prepare-release.ps1 -Runtime '${{ matrix.runtime }}'
       - name: Build native voice
-        if: steps.voice-cache.outputs.cache-hit != 'true'
+        if: steps.voice-ready.outputs.available != 'true'
         run: ./scripts/build-voice.ps1 -Parallel 3
       - name: Cache compiled native voice
         if: steps.voice-cache.outputs.cache-hit != 'true'

@@ -67,7 +67,9 @@ Starting with preview.5, an updated Helltube server can negotiate direct-to-meta
 
 With an updated Helltube server, Strife uses a dedicated desktop embed and adds room selection and video mute controls outside the frame. A Windows x64 development helper can handle Helltube's **Share desktop** action: choose a window or display in Strife and start sharing directly to that room. Publishing credentials are handled automatically and remain separate from standalone OBS tokens. Room changes, sign-out, reload, and closing Strife stop the stream.
 
-Build the helper with `./scripts/build-streaming.ps1` after preparing Helltube's pinned OBS SDK. It uses 720p30 H.264/Opus, video only by default, with optional system audio. Builds without the helper retain browser sharing. This feature is not in published installers yet; see [setup, limitations and protocol details](docs/helltube-embed.md).
+Build the helper with `./scripts/build-streaming.ps1` after preparing Helltube's pinned OBS SDK. The development picker offers H.264 quality presets through **4K60 40 Mbps** with an updated Helltube server, defaulting to **1080p60 8 Mbps**. It separates screens/windows, filters sources by name, and offers optional Automatic or Manual audio: system output for a screen, application audio for a window, or an explicitly selected application/output. Older servers keep high-resolution presets disabled. Rebuild older helpers to enable the quality/audio contract. Builds without the helper retain browser sharing. This feature is not in published installers yet; see [setup, limitations and protocol details](docs/helltube-embed.md).
+
+Windows development builds also provide local preview/thumbnails, an audio meter, custom quality controls, no-upscale output, and locally probed NVENC/Quick Sync/AMF encoder selection with x264 fallback available explicitly. `publish.ps1 -IncludeDevelopmentStreaming` opts a Windows prerelease into validated development packaging; normal release builds still omit the helper. macOS/Linux native support and public-release certification remain outstanding.
 
 ## Import from Mumble
 

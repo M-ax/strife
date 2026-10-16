@@ -66,12 +66,25 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
                 Send(new { type = "result", id, ok = true, batch = SystemFontCatalog.Shared.Read(message["offset"]?.GetValue<int>() ?? 0) });
             else if (command == "streamSources" && streaming is not null)
                 Send(new { type = "result", id, ok = true, value = await streaming.SourcesAsync(message["shareId"]!.GetValue<string>()) });
+            else if ((command == "streamPreview" || command == "streamThumbnail") && streaming is not null)
+                Send(new { type = "result", id, ok = true, value = await streaming.PreviewAsync(message["shareId"]!.GetValue<string>(),
+                    message["sourceId"]!.GetValue<string>(), message["audioId"]!.GetValue<string>(), message["qualityId"]!.GetValue<string>(),
+                    message["customQuality"]?.AsObject(), message["publishing"]?.AsObject(),
+                    message["audioBitrateKbps"]?.GetValue<int>() ?? 128, message["encoderId"]?.GetValue<string>() ?? "obs_x264",
+                    command == "streamThumbnail") });
             else if (command == "streamStart" && streaming is not null)
                 Send(new { type = "result", id, ok = true, value = await streaming.StartAsync(message["shareId"]!.GetValue<string>(),
-                    message["sourceId"]!.GetValue<string>(), message["audio"]?.GetValue<bool>() == true,
-                    preferences.Current.HelltubeUrl, message["credential"]!.AsObject()) });
+                    message["sourceId"]!.GetValue<string>(), message["audioId"]!.GetValue<string>(),
+                    preferences.Current.HelltubeUrl, message["credential"]!.AsObject(), message["qualityId"]?.GetValue<string>(),
+                    message["customQuality"]?.AsObject(), message["audioBitrateKbps"]?.GetValue<int>() ?? 128,
+                    message["encoderId"]?.GetValue<string>() ?? "obs_x264") });
             else if (command == "streamStatus" && streaming is not null)
                 Send(new { type = "result", id, ok = true, value = await streaming.StatusAsync() });
+            else if (command == "streamPreviewStop" && streaming is not null)
+            {
+                await streaming.StopPreviewAsync(message["shareId"]!.GetValue<string>());
+                Send(new { type = "result", id, ok = true });
+            }
             else if (command == "streamStop" && streaming is not null)
             {
                 await streaming.StopAsync();
