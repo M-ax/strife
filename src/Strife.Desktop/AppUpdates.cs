@@ -190,6 +190,12 @@ public sealed class AppUpdates : IDisposable
         lock (sync)
         {
             if (stopped || ready is null) return false;
+            if (ready.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                ready = null;
+                Set(new("error", Error: "Update authorization expired. Strife will check again quietly."));
+                return false;
+            }
             restart = true;
             Stop();
         }
@@ -215,7 +221,7 @@ public sealed class AppUpdates : IDisposable
         if (!Available || exitUpdate is not { } manifest) return;
         try
         {
-            if (DateTimeOffset.UtcNow >= manifest.ExpiresAt || AlreadyAttempted(manifest)) return;
+            if (DateTimeOffset.UtcNow >= manifest.ExpiresAt || AlreadyAttempted(manifest) || !Compatible(manifest)) return;
             manifest.VerifyPackageAsync(Path.Combine(VelopackLocator.Current.PackagesDir!, manifest.FileName)).GetAwaiter().GetResult();
             File.WriteAllText(Path.Combine(cache, "attempted.txt"), manifest.Sha256);
             UpdateSession.MarkApplying(manifest.Version, cache);

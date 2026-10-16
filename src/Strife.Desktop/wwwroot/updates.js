@@ -29,7 +29,7 @@ export function createUpdates(request) {
       const view = updatePresentation(message);
       button.hidden = view.hidden; button.disabled = view.disabled;
       button.textContent = view.label; button.title = view.title;
-      button.setAttribute('aria-label', view.title);
+      button.setAttribute('aria-label', `${view.label}. ${view.title}`);
       status.textContent = view.status;
     }
   };
