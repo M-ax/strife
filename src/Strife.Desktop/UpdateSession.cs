@@ -9,6 +9,7 @@ public sealed class UpdateSession : IDisposable
 {
     public static string Cache => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Strife", "updates");
     private FileStream? handle;
+    private Mutex? setupGuard;
     public bool Allowed { get; private set; } = true;
     private sealed record Applying(string Version, DateTimeOffset Until);
 
@@ -20,6 +21,7 @@ public sealed class UpdateSession : IDisposable
         {
             Directory.CreateDirectory(Cache);
             handle = new FileStream(Path.Combine(Cache, "application.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            setupGuard = new Mutex(false, @"Local\Strife.Desktop.Active");
             var marker = Path.Combine(Cache, "applying.json");
             if (!File.Exists(marker)) return;
             var applying = JsonSerializer.Deserialize<Applying>(File.ReadAllText(marker));
@@ -34,5 +36,5 @@ public sealed class UpdateSession : IDisposable
     public static void MarkApplying(string version, string cache) => File.WriteAllText(Path.Combine(cache, "applying.json"),
         JsonSerializer.Serialize(new Applying(version, DateTimeOffset.UtcNow.AddMinutes(3))));
 
-    public void Dispose() => handle?.Dispose();
+    public void Dispose() { setupGuard?.Dispose(); handle?.Dispose(); }
 }

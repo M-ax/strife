@@ -25,8 +25,11 @@ public sealed class SignedUpdateSource(HttpClient http, string cache, string cha
         Action<int> progress, CancellationToken cancelToken = default)
     {
         var manifest = Manifest ?? throw new InvalidDataException("No verified update.");
-        if (asset.FileName != manifest.FileName || asset.SHA256 != manifest.Sha256 || asset.Size != manifest.Bytes)
+        if (asset.FileName != manifest.FileName || !manifest.Sha256.Equals(asset.SHA256, StringComparison.OrdinalIgnoreCase) || asset.Size != manifest.Bytes)
             throw new InvalidDataException("Update does not match signed metadata.");
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancelToken);
+        deadline.CancelAfter(TimeSpan.FromMinutes(20));
+        cancelToken = deadline.Token;
         Directory.CreateDirectory(cache);
         var partial = Path.Combine(cache, manifest.Sha256 + ".partial");
         var offset = File.Exists(partial) ? new FileInfo(partial).Length : 0;

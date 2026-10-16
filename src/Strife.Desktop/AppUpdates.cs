@@ -50,7 +50,7 @@ public sealed class AppUpdates : IDisposable
         channel = version.Split('+')[0].Contains('-') ? "preview" : "stable";
         source = new(http, Path.Combine(cache, "downloads"), channel);
         manager = new(source, new UpdateOptions { ExplicitChannel = channel, AllowVersionDowngrade = false });
-        Available = OperatingSystem.IsWindows() && Environment.Is64BitProcess
+        Available = OperatingSystem.IsWindows() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64
             && manager.IsInstalled && !manager.IsPortable && manager.AppId == "Strife";
     }
 
@@ -144,6 +144,12 @@ public sealed class AppUpdates : IDisposable
                         {
                             ready = null;
                             Set(new("downloading", manifest.Version));
+                            var existing = Path.Combine(VelopackLocator.Current.PackagesDir!, manifest.FileName);
+                            if (File.Exists(existing))
+                            {
+                                try { await manifest.VerifyPackageAsync(existing, lifetime.Token); }
+                                catch (InvalidDataException) { File.Delete(existing); }
+                            }
                             await manager.DownloadUpdatesAsync(update, progress => Set(new("downloading", manifest.Version, progress)), lifetime.Token);
                             await manifest.VerifyPackageAsync(Path.Combine(VelopackLocator.Current.PackagesDir!, manifest.FileName), lifetime.Token);
                         }
@@ -234,7 +240,8 @@ public sealed class AppUpdates : IDisposable
     private static bool IsUpdateFailure(Exception e) => e is IOException or UnauthorizedAccessException
         or HttpRequestException or OperationCanceledException or JsonException or FormatException
         or System.Security.Cryptography.CryptographicException or ArgumentException or InvalidOperationException
-        or System.ComponentModel.Win32Exception;
+        or System.ComponentModel.Win32Exception or TimeoutException
+        || e.GetType().Namespace?.StartsWith("Velopack.", StringComparison.Ordinal) == true;
 
     private void Log(Exception error)
     {

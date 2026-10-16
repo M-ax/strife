@@ -28,6 +28,7 @@ VersionInfoVersion={#AppNumericVersion}
 Compression=lzma2
 SolidCompression=yes
 CloseApplications=no
+AppMutex=Local\Strife.Desktop.Active
 RestartApplications=no
 SetupLogging=yes
 

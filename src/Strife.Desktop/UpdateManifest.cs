@@ -53,7 +53,8 @@ public sealed record UpdateManifest(int Schema, string Channel, string Version, 
     public VelopackAsset Asset() => new()
     {
         PackageId = "Strife", Version = SemanticVersion.Parse(Version), Type = VelopackAssetType.Full,
-        FileName = FileName, Size = Bytes, SHA256 = Sha256
+        // Velopack compares SHA-256 using ordinal uppercase hex.
+        FileName = FileName, Size = Bytes, SHA256 = Sha256.ToUpperInvariant()
     };
 
     public async Task VerifyPackageAsync(string path, CancellationToken token = default)
