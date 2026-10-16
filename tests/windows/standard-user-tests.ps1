@@ -6,10 +6,12 @@ if (([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::
 }
 Write-Host 'Running installation and OTA checks without administrator membership.'
 # Alternate-credential processes can inherit the runner's environment strings.
-# Resolve profile paths using the actual user token instead.
-$env:USERPROFILE = [Environment]::GetFolderPath('UserProfile')
-$env:LOCALAPPDATA = [Environment]::GetFolderPath('LocalApplicationData')
-$env:APPDATA = [Environment]::GetFolderPath('ApplicationData')
+# .NET's profile folder shortcuts can also use those inherited strings.
+# Resolve the loaded account profile from its SID before starting any tools.
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$env:USERPROFILE = Get-ItemPropertyValue "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -Name ProfileImagePath
+$env:LOCALAPPDATA = Join-Path $env:USERPROFILE 'AppData/Local'
+$env:APPDATA = Join-Path $env:USERPROFILE 'AppData/Roaming'
 $env:TEMP = Join-Path $env:LOCALAPPDATA 'Temp'
 $env:TMP = $env:TEMP
 $env:DOTNET_CLI_HOME = $env:USERPROFILE
