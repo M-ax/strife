@@ -51,7 +51,7 @@ public sealed class AppUpdates : IDisposable
         source = new(http, Path.Combine(cache, "downloads"), channel);
         manager = new(source, new UpdateOptions { ExplicitChannel = channel, AllowVersionDowngrade = false });
         Available = OperatingSystem.IsWindows() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64
-            && manager.IsInstalled && !manager.IsPortable && manager.AppId == "Strife";
+            && manager.IsInstalled && !manager.IsPortable && manager.AppId == "Strife" && IsPerUserInstall();
     }
 
     public void Start()
@@ -235,6 +235,20 @@ public sealed class AppUpdates : IDisposable
         return runtime?.GetValue("Installed") is int installed && installed == 1
             && System.Version.TryParse((runtime.GetValue("Version") as string)?.TrimStart('v'), out var version)
             && version >= System.Version.Parse(manifest.MinimumVcRuntime);
+    }
+
+    private static bool IsPerUserInstall()
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        var locator = VelopackLocator.Current;
+        using var registration = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Strife");
+        var location = registration?.GetValue("InstallLocation") as string;
+        // A copied/portable tree or a machine-wide installation must not gain
+        // unattended execution through Velopack's writable-cache fallback.
+        return location is not null && locator.RootAppDir is not null
+            && Path.GetFullPath(location).TrimEnd(Path.DirectorySeparatorChar).Equals(
+                Path.GetFullPath(locator.RootAppDir).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)
+            && string.Equals(locator.PackagesDir, Path.Combine(locator.RootAppDir, "packages"), StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsUpdateFailure(Exception e) => e is IOException or UnauthorizedAccessException

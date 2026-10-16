@@ -11,7 +11,7 @@ foreach ($version in @('0.1.0-preview.1', '0.1.0-preview.2')) {
     $output = Join-Path $stage $version
     dotnet publish (Join-Path $root 'tests/Strife.UpdateFixture') -c Release -r win-x64 --self-contained "-p:Version=$version" -o $output
     if ($LASTEXITCODE) { throw 'Update fixture publish failed.' }
-    dotnet vpk pack --packId Strife --packVersion $version --packDir $output --mainExe Strife.UpdateFixture.exe --channel preview --delta None --shortcuts None --outputDir (Join-Path $stage "$version-pack")
+    dotnet vpk pack --packId Strife --packVersion $version --packDir $output --mainExe Strife.UpdateFixture.exe --channel preview --runtime win-x64 --delta None --shortcuts None --outputDir (Join-Path $stage "$version-pack")
     if ($LASTEXITCODE) { throw 'Update fixture packaging failed.' }
 }
 $setup = (Get-ChildItem (Join-Path $stage '0.1.0-preview.1-pack') -Filter '*Setup.exe').FullName
@@ -32,7 +32,13 @@ try {
         $deadline = [DateTime]::UtcNow.AddMinutes(2)
         do {
             Start-Sleep -Milliseconds 500
-            $installed = (Get-ItemProperty $registry -ErrorAction SilentlyContinue).DisplayVersion
+            # Apps & Features deliberately stores the numeric short version.
+            # Verify the full prerelease in the actual installed package instead.
+            $installed = $null
+            try {
+                $manifest = [xml](Get-Content (Join-Path $install 'current/sq.version') -Raw)
+                $installed = $manifest.SelectSingleNode("//*[local-name()='metadata']/*[local-name()='version']").InnerText
+            } catch { }
         } while ($installed -ne '0.1.0-preview.2' -and [DateTime]::UtcNow -lt $deadline)
         if ($installed -ne '0.1.0-preview.2') { throw 'Update did not install after exit.' }
         if ($restart -eq 'true') {
@@ -52,6 +58,9 @@ try {
 } finally {
     $env:STRIFE_UPDATE_FIXTURE = $null
     $env:STRIFE_UPDATE_RESTART = $null
+    if (Test-Path (Join-Path $env:LOCALAPPDATA 'velopack/velopack_Strife.log')) {
+        Copy-Item (Join-Path $env:LOCALAPPDATA 'velopack/velopack_Strife.log') (Join-Path $stage 'updater.log') -Force
+    }
     if (Test-Path (Join-Path $install 'Update.exe')) {
         Start-Process (Join-Path $install 'Update.exe') -ArgumentList 'uninstall', '--silent' -Wait
     }
