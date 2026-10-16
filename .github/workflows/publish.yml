@@ -177,12 +177,9 @@ jobs:
           }
           $runtime = Get-ItemProperty $key
           if ($runtime.Installed -ne 1 -or [version]$runtime.Version.TrimStart('v') -lt $required) { throw 'VC++ runtime verification failed.' }
-      - name: Test Windows installation, upgrade and removal
+      - name: Test Windows installation and OTA as a standard user
         if: runner.os == 'Windows'
-        run: ./tests/windows/installer.ps1 -Installer (Join-Path $PWD "artifacts/release/Strife-$env:STRIFE_VERSION-win-x64-Setup.exe")
-      - name: Test Windows OTA exit and restart
-        if: runner.os == 'Windows'
-        run: ./tests/windows/updates.ps1
+        run: ./tests/windows/as-standard-user.ps1 -Installer (Join-Path $PWD "artifacts/release/Strife-$env:STRIFE_VERSION-win-x64-Setup.exe")
       - name: Sign Windows update metadata
         if: runner.os == 'Windows'
         env:
@@ -205,6 +202,7 @@ jobs:
           overwrite: true
           path: |
             artifacts/installer-test/*.log
+            artifacts/standard-user-test/*.log
             artifacts/update-test/**/*.log
             artifacts/update-test/cache/last-error.txt
             artifacts/mumble-build/CMakeFiles/CMakeConfigureLog.yaml

@@ -94,10 +94,13 @@ new fixed version or a manual repair. Profiles are never part of replacement.
 4. Run `npm run release:verify` against production. It verifies all public
    downloads plus signed feed bytes and the full OTA package, headers and ranges.
 
-Renew signed metadata before its 30-day expiry even if no new build ships; sign
-the same immutable package and source revision with new issue/expiry times and
-re-import/deploy the feed. Never overwrite an existing package with different
-bytes. Expired metadata disables updates, not normal use of Strife.
+Renew signed metadata before its 30-day expiry even if no new build ships. Run
+the **Renew update metadata** workflow with the original successful Publish run
+ID; it authenticates the old envelope/package and signs only new issue/expiry
+times. Download its artifact and re-import/deploy the feed from `strife-web`.
+Keep the original signed artifact available for renewal (before Actions artifact
+retention expires, archive it). Never overwrite an existing package with
+different bytes. Expired metadata disables updates, not normal use of Strife.
 
 For planned key rotation, first ship a release trusted by the existing key that
 adds the next public key, then switch signing only after the transition cohort
