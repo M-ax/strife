@@ -18,20 +18,38 @@ try {
 `$ErrorActionPreference = 'Stop'
 `$env:CI = 'true'
 Set-Location '$($root.Replace("'", "''"))'
+Start-Transcript -Path '$((Join-Path $stage 'stdout.log').Replace("'", "''"))' -Force
+try {
 if (([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Installer tests must be non-elevated.' }
 dotnet tool restore
 if (`$LASTEXITCODE) { throw 'Cannot restore update test tool.' }
 & ./tests/windows/installer.ps1 -Installer '$($Installer.Replace("'", "''"))'
 & ./tests/windows/updates.ps1
+exit 0
+} catch { Write-Output `$_; exit 1 } finally { Stop-Transcript }
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-    $process = Start-Process (Get-Process -Id $PID).Path -Credential $credential -LoadUserProfile -ArgumentList '-NoProfile', '-EncodedCommand', $encoded `
-        -WorkingDirectory $root -RedirectStandardOutput (Join-Path $stage 'stdout.log') -RedirectStandardError (Join-Path $stage 'stderr.log') -PassThru
-    if (!$process.WaitForExit(900000)) { $process.Kill($true); throw 'Standard-user installer test timed out.' }
+    # GitHub's service session does not support CreateProcessWithLogon reliably.
+    # Task Scheduler gives the disposable account a normal batch logon/profile.
+    $action = New-ScheduledTaskAction -Execute (Get-Process -Id $PID).Path -Argument "-NoProfile -EncodedCommand $encoded" -WorkingDirectory $root
+    Register-ScheduledTask -TaskName $name -Action $action -User "$env:COMPUTERNAME\$name" `
+        -Password $credential.GetNetworkCredential().Password -RunLevel Limited | Out-Null
+    $before = (Get-ScheduledTaskInfo -TaskName $name).LastRunTime
+    Start-ScheduledTask -TaskName $name
+    $deadline = [DateTime]::UtcNow.AddMinutes(15)
+    do {
+        Start-Sleep -Seconds 2
+        $info = Get-ScheduledTaskInfo -TaskName $name
+        $state = (Get-ScheduledTask -TaskName $name).State
+    } while (($info.LastRunTime -le $before -or $state -in @('Running', 'Queued')) -and [DateTime]::UtcNow -lt $deadline)
+    if ([DateTime]::UtcNow -ge $deadline) { throw 'Standard-user installer test timed out.' }
     Get-Content (Join-Path $stage 'stdout.log')
-    Get-Content (Join-Path $stage 'stderr.log')
-    if ($process.ExitCode) { throw "Standard-user installer tests failed: $($process.ExitCode)" }
+    if ($info.LastTaskResult) { throw "Standard-user installer tests failed: $($info.LastTaskResult)" }
     Write-Host 'PASS: installer and OTA tests ran without administrator membership.'
 } finally {
+    if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $name
+        Unregister-ScheduledTask -TaskName $name -Confirm:$false
+    }
     if (Get-LocalUser -Name $name -ErrorAction SilentlyContinue) { Remove-LocalUser -Name $name }
 }
