@@ -10,10 +10,10 @@ AppPublisher=Strife
 AppPublisherURL=https://github.com/M-ax/strife
 AppSupportURL=https://github.com/M-ax/strife/issues
 AppUpdatesURL=https://github.com/M-ax/strife/releases
-DefaultDirName={autopf}\Strife
+DefaultDirName={localappdata}\Programs\Strife
 DefaultGroupName=Strife
 DisableProgramGroupPage=yes
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 MinVersion=10.0.19041
@@ -60,6 +60,7 @@ Filename: "{app}\Strife.exe"; Description: "Launch Strife"; Flags: nowait postin
 const
   WebViewKey = 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
   VCRuntimeKey = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
+  UninstallKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{3AF3EC03-735A-4F65-9A4D-1C611D72D812}_is1';
 var
   PrerequisiteRestart: Boolean;
 
@@ -70,9 +71,15 @@ var
   PreviousPacked, CurrentPacked: Int64;
 begin
   Result := True;
-  if RegQueryStringValue(HKLM64,
-    'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{3AF3EC03-735A-4F65-9A4D-1C611D72D812}_is1',
-    'DisplayVersion', PreviousVersion) then
+  { Do not leave two installations and competing shortcuts. Never uninstall an
+    all-user application from an unattended per-user update. }
+  if RegKeyExists(HKLM64, UninstallKey) or RegKeyExists(HKLM32, UninstallKey) then
+  begin
+    SuppressibleMsgBox('Strife is installed for all users. Close Strife and uninstall that installation in Windows Settings, then run this Setup again to install for your account. Your Strife profile will be preserved.', mbError, MB_OK, IDOK);
+    Result := False;
+    Exit;
+  end;
+  if RegQueryStringValue(HKCU, UninstallKey, 'DisplayVersion', PreviousVersion) then
   begin
     Suffix := Pos('-', PreviousVersion);
     if Suffix > 0 then Delete(PreviousVersion, Suffix, Length(PreviousVersion));
@@ -89,9 +96,12 @@ function HasWebView2: Boolean;
 var
   Version: String;
 begin
-  { All-user installs need a machine runtime, even if the admin has a user runtime. }
+  { Either the shared runtime or this user's runtime can serve a per-user app. }
   Result := RegQueryStringValue(HKLM32, WebViewKey, 'pv', Version) and
     (Version <> '') and (Version <> '0.0.0.0');
+  if not Result then
+    Result := RegQueryStringValue(HKCU, WebViewKey, 'pv', Version) and
+      (Version <> '') and (Version <> '0.0.0.0');
 end;
 
 function HasVCRuntime: Boolean;
@@ -110,13 +120,24 @@ begin
   end;
 end;
 
-function InstallPrerequisite(const FileName, Arguments: String): String;
+function InstallPrerequisite(const FileName, Arguments: String; RequiresElevation: Boolean): String;
 var
   ExitCode: Integer;
+  Started: Boolean;
 begin
   Result := '';
+  { A background update must never trigger UAC or launch prerequisite UI. }
+  if RequiresElevation and WizardSilent then
+  begin
+    Result := 'The Microsoft Visual C++ Runtime needs installation or repair. Run Setup interactively to authorize this prerequisite.';
+    Exit;
+  end;
   ExtractTemporaryFile(FileName);
-  if not Exec(ExpandConstant('{tmp}\') + FileName, Arguments, '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+  if RequiresElevation then
+    Started := ShellExec('runas', ExpandConstant('{tmp}\') + FileName, Arguments, '', SW_HIDE, ewWaitUntilTerminated, ExitCode)
+  else
+    Started := Exec(ExpandConstant('{tmp}\') + FileName, Arguments, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  if not Started then
     Result := 'Could not start ' + FileName + ': ' + SysErrorMessage(ExitCode)
   else if (ExitCode = 3010) or (ExitCode = 1641) then
     PrerequisiteRestart := True
@@ -130,7 +151,7 @@ begin
   if not HasVCRuntime then
   begin
     WizardForm.StatusLabel.Caption := 'Installing Microsoft Visual C++ Runtime...';
-    Result := InstallPrerequisite('VC_redist.x64.exe', '/install /quiet /norestart');
+    Result := InstallPrerequisite('VC_redist.x64.exe', '/install /quiet /norestart', True);
     if Result <> '' then Exit;
     if not HasVCRuntime then
     begin
@@ -142,7 +163,7 @@ begin
   if not HasWebView2 then
   begin
     WizardForm.StatusLabel.Caption := 'Installing Microsoft Edge WebView2 Runtime...';
-    Result := InstallPrerequisite('MicrosoftEdgeWebView2RuntimeInstallerX64.exe', '/silent /install');
+    Result := InstallPrerequisite('MicrosoftEdgeWebView2RuntimeInstallerX64.exe', '/silent /install', False);
     if Result <> '' then Exit;
     if not HasWebView2 then
       Result := 'Microsoft Edge WebView2 Runtime could not be verified. Install it and run Setup again.';

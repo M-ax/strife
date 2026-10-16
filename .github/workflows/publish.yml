@@ -136,6 +136,13 @@ jobs:
         run: ./scripts/publish.ps1 -Runtime '${{ matrix.runtime }}' -Version $env:STRIFE_VERSION
       - name: Check packaged native engine
         run: ./scripts/test-package.ps1 -Runtime '${{ matrix.runtime }}'
+      - name: Provision Windows machine prerequisite for silent install tests
+        if: runner.os == 'Windows'
+        run: |
+          # Per-user silent Setup deliberately never elevates to install VC++.
+          # Provision the signed, bundled prerequisite on this disposable runner.
+          $process = Start-Process -FilePath (Join-Path $PWD 'artifacts/prerequisites/VC_redist.x64.exe') -ArgumentList '/install', '/quiet', '/norestart' -Wait -PassThru
+          if ($process.ExitCode -notin @(0, 3010)) { throw "VC++ provisioning failed: $($process.ExitCode)" }
       - name: Test Windows installation, upgrade and removal
         if: runner.os == 'Windows'
         run: ./tests/windows/installer.ps1 -Installer (Join-Path $PWD "artifacts/release/Strife-$env:STRIFE_VERSION-win-x64-Setup.exe")

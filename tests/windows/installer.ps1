@@ -1,12 +1,19 @@
-# Run on a disposable Windows CI machine: this exercises a real all-user install.
+# Run on a disposable Windows CI machine with prerequisites installed.
+# Run as a standard user to exercise the non-elevated install path.
 param([Parameter(Mandatory)][string]$Installer)
 $ErrorActionPreference = 'Stop'
 if ($env:CI -ne 'true') { throw 'Run this installation test on a disposable CI runner (CI=true).' }
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $stage = Join-Path $root 'artifacts/installer-test'
-$application = Join-Path $stage 'application'
-$registry = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{3AF3EC03-735A-4F65-9A4D-1C611D72D812}_is1'
-if (Test-Path $registry) { throw 'An existing Strife installation must not be modified by this test.' }
+$application = Join-Path $env:LOCALAPPDATA 'Programs/Strife'
+$uninstallKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{3AF3EC03-735A-4F65-9A4D-1C611D72D812}_is1'
+$registry = "HKCU:\$uninstallKey"
+$machineRegistry = "HKLM:\$uninstallKey"
+$shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Strife.lnk'
+$machineShortcut = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Strife.lnk'
+foreach ($path in @($registry, $machineRegistry, $application, $shortcut, $machineShortcut)) {
+    if (Test-Path $path) { throw "Existing Strife installation data must not be modified by this test: $path" }
+}
 New-Item -ItemType Directory -Force $stage | Out-Null
 $profile = Join-Path $env:LOCALAPPDATA 'Strife'
 New-Item -ItemType Directory -Force $profile | Out-Null
@@ -19,13 +26,15 @@ function Invoke-Setup([string]$Path, [string[]]$Arguments) {
 }
 try {
     foreach ($pass in @('install', 'upgrade')) {
-        Invoke-Setup $Installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/RESTARTEXITCODE=3010', "/DIR=`"$application`"", "/LOG=`"$(Join-Path $stage "$pass.log")`"")
+        Invoke-Setup $Installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/RESTARTEXITCODE=3010', "/LOG=`"$(Join-Path $stage "$pass.log")`"")
         foreach ($file in @('Strife.exe', 'voice/strife-voice.exe', 'voice/rnnoise.dll', 'voice/speexdsp.dll', 'wwwroot/index.html', 'unins000.exe')) {
             if (!(Test-Path (Join-Path $application $file))) { throw "Installer omitted $file." }
         }
-        if (!(Test-Path $registry)) { throw 'Apps & Features registration is missing.' }
-        $shortcut = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Strife.lnk'
-        if (!(Test-Path $shortcut)) { throw 'Start Menu shortcut is missing.' }
+        if (!(Test-Path $registry)) { throw 'Per-user Apps & Features registration is missing.' }
+        if (!(Test-Path $shortcut)) { throw 'Per-user Start Menu shortcut is missing.' }
+        if ((Test-Path $machineRegistry) -or (Test-Path $machineShortcut)) {
+            throw 'Setup created machine-wide application registration or shortcuts.'
+        }
         if (!(Test-Path $sentinel)) { throw 'Setup removed the user profile.' }
         if ($pass -eq 'install') {
             'old runtime' | Set-Content (Join-Path $application 'obsolete.dll')

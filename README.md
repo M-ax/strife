@@ -26,6 +26,8 @@ For a self-contained app and full Windows installer, install Inno Setup 6.3 or n
 
 The setup executable and portable ZIP are written to `artifacts/release`. Setup includes the .NET runtime, native voice engine, and offline Microsoft WebView2/Visual C++ installers. It creates a Start Menu shortcut, optionally creates a desktop shortcut, supports upgrades, and registers an uninstaller. Profiles survive upgrades and uninstall. Use `-NoPackage` to publish only the portable directory; keep that entire directory together.
 
+Source builds now install Windows Strife for the current user under `%LOCALAPPDATA%\Programs\Strife`, rather than for all users. If an older machine-wide installation exists, close and uninstall it first, then run Setup normally (not as administrator); the profile is preserved. Installing or updating the Visual C++ prerequisite may request administrator approval. Silent Setup will not request elevation if that prerequisite is missing or outdated. This change is not yet in the published downloads, and OTA updating is not enabled yet; see the [Windows OTA implementation plan](docs/auto-updates.md).
+
 ## Releases and other platforms
 
 Publishing a GitHub release with a version tag such as `v0.1.0` starts the **Publish** workflow. It builds Windows x64, Linux x64, macOS Intel, and macOS Apple Silicon on native runners. Once every build and packaging check passes, it attaches the Windows installer/portable ZIP, Linux tarball, macOS app ZIPs, and `SHA256SUMS.txt` to that release. **Run workflow** builds a supplied version as downloadable workflow artifacts without creating a release.
