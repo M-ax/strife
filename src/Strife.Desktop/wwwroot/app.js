@@ -4,6 +4,7 @@ import { renderChat } from './chat.js';
 import { createAppearanceSettings } from './appearance.js';
 import { createSharing } from './sharing.js';
 import { createDownloads } from './downloads.js';
+import { createUpdates } from './updates.js';
 
 const $ = id => document.getElementById(id);
 // Keep the per-launch capability in this history entry so F5 can reattach.
@@ -42,6 +43,7 @@ const workspace = createWorkspace($('workspace'), layout => {
   else { try { localStorage.setItem('strife-workspace', JSON.stringify(layout)); } catch {} }
 });
 const downloads = createDownloads({request, notice});
+const updates = createUpdates(request);
 if (!native) {
   try { workspace.restore(JSON.parse(localStorage.getItem('strife-workspace'))); } catch {}
 }
@@ -148,7 +150,9 @@ function renderTree() {
 }
 function receive(raw) {
   let message; try { message = JSON.parse(raw); } catch { return; }
-  if (message.type === 'downloads') {
+  if (message.type === 'update') {
+    updates.receive(message);
+  } else if (message.type === 'downloads') {
     downloads.receive(message);
   } else if (message.type === 'result') {
     const item = pending.get(message.id); if (!item) return;

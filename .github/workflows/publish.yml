@@ -172,6 +172,16 @@ jobs:
       - name: Test Windows installation, upgrade and removal
         if: runner.os == 'Windows'
         run: ./tests/windows/installer.ps1 -Installer (Join-Path $PWD "artifacts/release/Strife-$env:STRIFE_VERSION-win-x64-Setup.exe")
+      - name: Test Windows OTA exit and restart
+        if: runner.os == 'Windows'
+        run: ./tests/windows/updates.ps1
+      - name: Sign Windows update metadata
+        if: runner.os == 'Windows'
+        env:
+          STRIFE_UPDATE_SIGNING_KEY: ${{ secrets.STRIFE_UPDATE_SIGNING_KEY }}
+        run: |
+          node scripts/sign-update.mjs artifacts/release $env:STRIFE_VERSION '${{ github.sha }}'
+          if ($LASTEXITCODE) { throw 'Update metadata signing failed.' }
       - uses: actions/upload-artifact@v7
         with:
           name: Strife-${{ matrix.runtime }}

@@ -10,6 +10,10 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Never let a cached, unsigned package auto-apply during startup.
+        Velopack.VelopackApp.Build().SetAutoApplyOnStartup(false).Run();
+        using var updateSession = new UpdateSession();
+        if (!updateSession.Allowed) return 1;
         var profile = Environment.GetEnvironmentVariable("STRIFE_PROFILE")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Strife");
         Directory.CreateDirectory(profile);
@@ -57,8 +61,9 @@ public static class Program
             });
         }
         using var downloads = new DownloadManager(Path.Combine(profile, "downloads"), Publish);
+        using var updates = new AppUpdates(Publish);
         var video = new HelltubeProxy(origin, downloads);
-        using var bridge = new DesktopBridge(preferences, voice, origin, Publish, () => app.Dispatcher.BeginInvoke(window.Close), video.LoadEmbedAsync, streaming, downloads);
+        using var bridge = new DesktopBridge(preferences, voice, origin, Publish, () => app.Dispatcher.BeginInvoke(window.Close), video.LoadEmbedAsync, streaming, downloads, updates);
         voice.Message += message => Publish(message.GetRawText());
         voice.Stopped += error => Publish(System.Text.Json.JsonSerializer.Serialize(new { type = "engine", ready = false, error }));
         window.RegisterCreatedHandler((_, _) => voice.OwnerWindow = window.WindowHandle);
@@ -67,12 +72,20 @@ public static class Program
         {
             if (e.Uri.GetLeftPart(UriPartial.Path) != origin.AbsoluteUri) e.Cancel = true;
         });
-        window.RegisterClosingHandler((_, _) => closing = true);
+        window.RegisterClosingHandler((_, _) => { closing = true; updates.Stop(); });
         window.Load(origin.AbsoluteUri + "#" + bridge.Token);
-        try { return app.Run(window); }
+        updates.Start();
+        var normalExit = false;
+        try
+        {
+            var result = app.Run(window);
+            normalExit = result == 0;
+            return result;
+        }
         finally
         {
             closing = true;
+            updates.Stop();
             downloads.Dispose();
             streaming.DisposeAsync().AsTask().GetAwaiter().GetResult();
             voice.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -80,6 +93,8 @@ public static class Program
             server.StopAsync().GetAwaiter().GetResult();
             server.DisposeAsync().AsTask().GetAwaiter().GetResult();
             files.Dispose();
+            if (normalExit && (!OperatingSystem.IsWindows() || GetSystemMetrics(0x2000) == 0))
+                updates.ApplyOnExit();
         }
     }
 
@@ -99,4 +114,7 @@ public static class Program
 
     [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "MessageBoxW", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private static extern int MessageBox(IntPtr window, string text, string caption, uint type);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
 }

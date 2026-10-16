@@ -11,15 +11,16 @@ test('Windows Setup defaults to a per-user installation with no privilege overri
   assert.match(installer, /^DefaultDirName=\{localappdata\}\\Programs\\Strife$/m);
   assert.match(installer, /^PrivilegesRequired=lowest$/m);
   assert.doesNotMatch(installer, /^PrivilegesRequiredOverridesAllowed=/m);
-  assert.match(installer, /Name: "\{autoprograms\}\\Strife"/);
-  assert.match(installer, /Name: "\{autodesktop\}\\Strife"/);
+  assert.match(installer, /^Uninstallable=no$/m);
+  assert.match(installer, /--silent --installto/);
+  assert.doesNotMatch(installer, /\[InstallDelete\]/);
 });
 
 test('Setup blocks legacy machine installations and checks current-user upgrades', () => {
   const initialize = section('function InitializeSetup', 'function HasWebView2');
   assert.match(initialize, /RegKeyExists\(HKLM64, UninstallKey\) or RegKeyExists\(HKLM32, UninstallKey\)/);
   assert.match(initialize, /Result := False;\s+Exit;/);
-  assert.match(initialize, /RegQueryStringValue\(HKCU, UninstallKey, 'DisplayVersion'/);
+  assert.match(initialize, /RegQueryStringValue\(HKCU, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Strife', 'DisplayVersion'/);
 });
 
 test('WebView2 supports both scopes and only VC++ can request elevation', () => {

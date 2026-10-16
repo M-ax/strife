@@ -13,13 +13,13 @@ All four native builds must succeed before any assets are attached. Rerunning th
 
 The ZIP/tar archives include .NET, the voice engine, UI assets and dependency notices. The Windows portable ZIP needs WebView2 and the VC++ runtime already installed; the setup executable embeds both standalone redistributables for offline installation. Their Microsoft Authenticode signatures are verified during packaging. The installer checks runtime presence/version, reports prerequisite failures, handles restart requests, provides shortcuts and Apps & Features registration, removes obsolete runtime files on upgrade, rejects numeric version downgrades, and preserves profiles on uninstall.
 
-## Unreleased: Windows per-user installation
+## Preview 0.1.0-preview.7: Windows OTA updates
 
-Source-built Setup defaults to `%LOCALAPPDATA%\Programs\Strife` and registers shortcuts and uninstall information for the current user. Run it normally, not as administrator. Existing all-user installations must be uninstalled explicitly before installing the per-user version; Setup refuses to create competing installations. Existing profiles are preserved by uninstall.
+Setup defaults to `%LOCALAPPDATA%\Programs\Strife` and registers shortcuts and uninstall information for the current user. Run it normally, not as administrator. Existing legacy installations must be uninstalled explicitly before installing the updater-capable version; Setup refuses to create competing installations. Existing profiles are preserved by uninstall. Inno Setup supplies offline prerequisites and bootstraps the pinned Velopack installer; Velopack owns subsequent file replacement and removal.
 
 WebView2 may be installed for the current user or already available machine-wide. The VC++ runtime remains a machine prerequisite: interactive Setup requests elevation only for that installer when needed; silent Setup fails without requesting elevation. CI provisions the bundled VC++ runtime before the silent installation test. That test checks the default installation directory, per-user registration/shortcuts, upgrade cleanup and profile preservation. A standard-user Windows VM must also exercise missing prerequisites, UAC cancellation, and the transition from a real previous all-user release before publication.
 
-This is the foundation for [Windows OTA updates](auto-updates.md), not a completed updater. No update button, background feed, or install-on-exit behavior is enabled yet. Published preview.6 packages retain their original installation behavior.
+The [Windows updater](auto-updates.md) checks signed channel metadata, downloads full packages quietly, and offers a small Update button. Clicking installs and restarts; normal exit installs without reopening. Portable and non-Windows packages remain manual-update only. The workflow produces a full `.nupkg` and signed `windows-preview.json` (or `windows-stable.json`) alongside the five advertised installer/archive packages. Import both with the exact source commit into the website, upload all six packages, then deploy and verify production. Do not advertise this release until those steps complete.
 
 ## Preview 0.1.0-preview.6
 

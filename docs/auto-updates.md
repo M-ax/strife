@@ -1,7 +1,8 @@
 # Windows OTA updates
 
-Status: implementation started; automatic updating is not enabled or published.
-Windows installed builds come first. macOS, Linux and portable builds follow.
+Implemented for Windows x64 installed builds using Velopack 1.2.161. macOS,
+Linux and portable builds retain manual updates. Older installs require one
+manual installation of the updater-capable release.
 
 ## User contract
 
@@ -14,13 +15,15 @@ Windows installed builds come first. macOS, Linux and portable builds follow.
   download must not delay exit; resume next launch.
 - Closing to the tray is not exit. Crashes, forced termination and OS shutdown
   are not dependable installation opportunities.
-- Failures are available in Settings/logs, without repeated notifications.
+- Failures are available in the application menu/logs, without repeated notifications.
 
-## Installation foundation (implemented in source)
+## Installation
 
 Setup uses Inno Setup's lowest privilege mode, a default directory of
 `%LOCALAPPDATA%\Programs\Strife`, and current-user registration and shortcuts.
-The AppId remains unchanged so subsequent per-user installers upgrade in place.
+The wrapper installs the Velopack package with ID `Strife`. Velopack owns
+`current/`, `packages/`, `Update.exe`, the Start Menu shortcut and current-user
+uninstall registration. The wrapper is not a second registered uninstaller.
 Profiles remain outside the installation directory.
 
 An existing all-user uninstall registration blocks Setup with instructions to
@@ -35,45 +38,74 @@ missing/outdated VC++ without UAC. This means an unattended update requiring a
 newer VC++ runtime must defer to an explicit interactive repair, not loop.
 The portable ZIP remains unchanged and does not opt into automatic updates.
 
-## Next: authenticated update feed and staging
+## Authentication and background policy
 
-Implement in the managed host, not the native Mumble engine.
+The managed host fetches `https://strife.zip/updates/windows-preview.json` or
+`windows-stable.json`, starting after 20 seconds and then every six hours.
+Failures back off from five minutes to six hours. Stable installs reject
+prereleases; preview installs stay on the preview feed. Full semantic version
+comparison rejects downgrades. Manual Setup retains its numeric downgrade check.
 
-- Derive a signed feed from actual immutable release packages, with version,
-  channel, source commit, OS/architecture constraints, minimum updater version,
-  URL, length and SHA-256.
-- Pin verification keys in the app. Define key rotation, metadata expiry and
-  replay protection before enabling execution. Hashes alone do not authenticate
-  metadata or an installer.
-- Keep stable and preview channels distinct; compare full semantic versions.
-  Current Setup's numeric downgrade check does not order preview suffixes.
-- Download over HTTPS to private user staging, outside both profiles and the
-  installation. Bound metadata/package sizes, validate destinations and
-  redirects, resume safely, and reject incompatible or untrusted packages.
-- Persist a small state machine: checking, downloading, verifying, ready,
-  installing, success/failure. Revalidate staged state after process restart.
-- Upload and verify all release artifacts before publishing feed metadata.
-  Reuse the existing R2 release workflow and exact source revision.
+Metadata is a JSON envelope containing base64 payload bytes and an RSA-PSS/SHA-256
+signature (32-byte salt). The client embeds `update-key.pem`; the private key is
+the GitHub Actions secret `STRIFE_UPDATE_SIGNING_KEY`, never a repository file.
+Schema 1 binds channel, version, immutable filename, length, SHA-256, exact source
+commit, issue/expiry times and minimum Windows/VC++ versions. Unknown schemas
+fail closed. Metadata is limited to 32 KiB and packages to 1 GiB. Issued times
+cannot go backward relative to previously verified metadata, even after expiry.
+Feeds expire after 30 days (client maximum: 45 days).
 
-## Next: installer handoff and UI
+Only the fixed HTTPS website origin serves packages. Redirects and cookies are
+disabled. Partial downloads are cached under `%LOCALAPPDATA%\Strife\updates`,
+with signed lengths and SHA-256 checked before use; Velopack stages full packages
+under the installation. Every restored ready package is reverified. Startup
+auto-apply in Velopack is explicitly disabled: cached bytes alone never authorize
+installation. The authenticated desktop bridge accepts only the Update action,
+not URLs, executable paths, version overrides or trust keys.
 
-Use the same verified payload for both Update and exit. A separate managed
-helper must coordinate all processes using the installation, wait for clean
-host/voice/streaming shutdown, and execute Setup with silent/no-restart flags.
-Do not let Setup terminate another active instance or install over loaded files.
-Only the explicit Update action relaunches after success.
+## Exit, restart and failure handling
 
-The helper must validate the installation scope and path (including writable
-custom directories), exclude portable/unrecognized/system-managed installs,
-prevent concurrent installation/relaunch races, and recheck package authenticity
-immediately before execution. Do not accept arbitrary executable paths from
-web content. Restrict commands to the authenticated top-level desktop bridge.
+Normal exit freezes the ready package and cancels unfinished network work.
+After the UI and owned streaming/voice processes shut down, the host rechecks
+the package hash and launches Velopack's silent wait-for-exit operation. Only an
+explicit button click requests relaunch. A per-user installation session lock
+prevents another installed profile from staying active during replacement; a
+short-lived applying marker prevents an old-version launch racing the helper.
+Windows shutdown detection skips the handoff. No crash handler installs updates.
 
-Define recovery before enabling unattended installs: retain a recoverable old
-payload, journal the operation, handle interruption/disk exhaustion/locked files,
-and record successful startup before removing recovery data. Inno's existing
-upgrade cleanup is not proof of transactional rollback. Profile migrations must
-remain compatible with any supported rollback. Never retry indefinitely.
+Velopack supplies replacement/rollback mechanics for installation failures,
+rather than Inno's previous delete-and-copy upgrade. Strife records each attempt
+before handoff and does not automatically retry the same failed package on every
+exit. A failed attempt exposes repair instructions in the menu. This is not
+automatic rollback of a successfully installed app that later crashes; use a
+new fixed version or a manual repair. Profiles are never part of replacement.
+`last-error.txt` in the update cache and Velopack's logs aid diagnostics.
+
+## Release operation and key lifecycle
+
+1. Build all advertised platforms from one exact commit. The Windows job runs
+   installation and real exit/restart fixture tests, then `scripts/sign-update.mjs`
+   signs the actual full package using the Actions secret.
+2. In `strife-web`, import the five public downloads normally, then run
+   `node scripts/import-update.mjs ARTIFACT_DIRECTORY`. This checks the signature,
+   hash, version and source commit before adding the update package/feed.
+3. Run `npm run release:docs`, build/tests, and `npm run release:upload`.
+   Packages must exist in R2 before `npm run deploy` advertises their feed.
+4. Run `npm run release:verify` against production. It verifies all public
+   downloads plus signed feed bytes and the full OTA package, headers and ranges.
+
+Renew signed metadata before its 30-day expiry even if no new build ships; sign
+the same immutable package and source revision with new issue/expiry times and
+re-import/deploy the feed. Never overwrite an existing package with different
+bytes. Expired metadata disables updates, not normal use of Strife.
+
+For planned key rotation, first ship a release trusted by the existing key that
+adds the next public key, then switch signing only after the transition cohort
+can verify it. Do not replace the only trusted key in a feed or rotate the
+Actions secret alone. Loss/compromise of the sole key requires a trusted manual
+installer recovery for clients that did not receive a transition release.
+Feed signatures do not make the initial Windows installer Authenticode-signed;
+the existing Windows publisher warning still applies.
 
 ## Release gates
 

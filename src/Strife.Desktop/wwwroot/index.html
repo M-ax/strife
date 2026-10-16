@@ -10,13 +10,16 @@
   <header class="appbar">
     <div class="brand"><img class="brand-mark" src="assets/mark.svg" width="32" height="32" alt=""> STRIFE <span class="tagline">VOICE + VIDEO</span></div>
     <div class="appbar-right"><span id="engine-label" class="muted">Starting voice engine…</span>
+      <button id="update-button" hidden>Update</button>
       <details id="menu" class="menu"><summary>☰ Menu</summary><nav aria-label="Application menu">
         <button id="appearance-settings">Appearance <small>Accent colors, chat font &amp; UI font</small></button>
         <button data-native="settings">Voice settings &amp; shortcuts <small>Devices, RNNoise, PTT, output, network</small></button>
         <button data-native="wizard">Audio setup wizard</button>
         <button data-native="certificate">Certificate &amp; identity</button>
         <button id="import-mumble">Import from Mumble <small>Settings, servers, shortcuts &amp; identity</small></button>
-        <hr><button id="video-settings-menu">Helltube server</button><button id="retry-engine">Retry voice engine</button><hr><button id="reset-layout">Reset panel layout</button><hr><button id="quit">Quit Strife</button>
+        <hr><button id="video-settings-menu">Helltube server</button><button id="retry-engine">Retry voice engine</button><hr><button id="reset-layout">Reset panel layout</button>
+        <hr><p id="update-status" class="form-note">Automatic updates require a Windows installed build.</p>
+        <button id="quit">Quit Strife</button>
       </nav></details>
     </div>
   </header>

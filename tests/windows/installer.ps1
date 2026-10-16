@@ -6,12 +6,14 @@ if ($env:CI -ne 'true') { throw 'Run this installation test on a disposable CI r
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $stage = Join-Path $root 'artifacts/installer-test'
 $application = Join-Path $env:LOCALAPPDATA 'Programs/Strife'
-$uninstallKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{3AF3EC03-735A-4F65-9A4D-1C611D72D812}_is1'
+$current = Join-Path $application 'current'
+$uninstallKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Strife'
+$legacyRegistry = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{3AF3EC03-735A-4F65-9A4D-1C611D72D812}_is1'
 $registry = "HKCU:\$uninstallKey"
 $machineRegistry = "HKLM:\$uninstallKey"
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Strife.lnk'
 $machineShortcut = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Strife.lnk'
-foreach ($path in @($registry, $machineRegistry, $application, $shortcut, $machineShortcut)) {
+foreach ($path in @($registry, $legacyRegistry, $machineRegistry, $application, $shortcut, $machineShortcut)) {
     if (Test-Path $path) { throw "Existing Strife installation data must not be modified by this test: $path" }
 }
 New-Item -ItemType Directory -Force $stage | Out-Null
@@ -25,11 +27,19 @@ function Invoke-Setup([string]$Path, [string[]]$Arguments) {
     if ($process.ExitCode -notin @(0, 3010)) { throw "Setup failed with exit code $($process.ExitCode)." }
 }
 try {
+    # A legacy per-user registration exercises the same explicit-migration guard
+    # as the machine-wide registration, without requiring an elevated test.
+    New-Item -Path $legacyRegistry -Force | Out-Null
+    try {
+        $blocked = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+        if ($blocked.ExitCode -eq 0 -or (Test-Path $current)) { throw 'Legacy installation was not blocked.' }
+    } finally { Remove-Item -LiteralPath $legacyRegistry }
     foreach ($pass in @('install', 'upgrade')) {
         Invoke-Setup $Installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/RESTARTEXITCODE=3010', "/LOG=`"$(Join-Path $stage "$pass.log")`"")
-        foreach ($file in @('Strife.exe', 'voice/strife-voice.exe', 'voice/rnnoise.dll', 'voice/speexdsp.dll', 'wwwroot/index.html', 'unins000.exe')) {
-            if (!(Test-Path (Join-Path $application $file))) { throw "Installer omitted $file." }
+        foreach ($file in @('Strife.exe', 'voice/strife-voice.exe', 'voice/rnnoise.dll', 'voice/speexdsp.dll', 'wwwroot/index.html')) {
+            if (!(Test-Path (Join-Path $current $file))) { throw "Installer omitted $file." }
         }
+        if (!(Test-Path (Join-Path $application 'Update.exe'))) { throw 'Updater/uninstaller is missing.' }
         if (!(Test-Path $registry)) { throw 'Per-user Apps & Features registration is missing.' }
         if (!(Test-Path $shortcut)) { throw 'Per-user Start Menu shortcut is missing.' }
         if ((Test-Path $machineRegistry) -or (Test-Path $machineShortcut)) {
@@ -37,20 +47,20 @@ try {
         }
         if (!(Test-Path $sentinel)) { throw 'Setup removed the user profile.' }
         if ($pass -eq 'install') {
-            'old runtime' | Set-Content (Join-Path $application 'obsolete.dll')
-            'old payload' | Set-Content (Join-Path $application 'voice/obsolete.txt')
-        } elseif ((Test-Path (Join-Path $application 'obsolete.dll')) -or (Test-Path (Join-Path $application 'voice/obsolete.txt'))) {
+            'old runtime' | Set-Content (Join-Path $current 'obsolete.dll')
+            'old payload' | Set-Content (Join-Path $current 'voice/obsolete.txt')
+        } elseif ((Test-Path (Join-Path $current 'obsolete.dll')) -or (Test-Path (Join-Path $current 'voice/obsolete.txt'))) {
             throw 'Upgrade left obsolete application files behind.'
         }
     }
-    $env:STRIFE_VOICE_ENGINE = Join-Path $application 'voice/strife-voice.exe'
+    $env:STRIFE_VOICE_ENGINE = Join-Path $current 'voice/strife-voice.exe'
     & dotnet run --project (Join-Path $root 'tests/Strife.Tests') -c Release -- --voice-startup-only
     if ($LASTEXITCODE) { throw 'Installed voice engine failed.' }
 } finally {
     $env:STRIFE_VOICE_ENGINE = $previousEngine
-    $uninstaller = Join-Path $application 'unins000.exe'
+    $uninstaller = Join-Path $application 'Update.exe'
     if (Test-Path $uninstaller) {
-        Invoke-Setup $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$(Join-Path $stage 'uninstall.log')`"")
+        Invoke-Setup $uninstaller @('uninstall', '--silent')
     }
     if (!(Test-Path $sentinel)) { throw 'Uninstall removed the user profile.' }
     Remove-Item -LiteralPath $sentinel

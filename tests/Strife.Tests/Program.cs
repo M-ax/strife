@@ -89,6 +89,7 @@ Check(Uri.UnescapeDataString(url.UserInfo) == "a@b:p/#?@", "Mumble credentials r
 Reject(() => PreferencesStore.MumbleUrl("example.com/path", 64738, "test", ""), "reject host path injection");
 Reject(() => PreferencesStore.MumbleUrl("example.com", 0, "test", ""), "reject invalid port");
 await FontTests.Run(Check);
+await UpdateTests.Run(Check, directory);
 var preferences = new PreferencesStore(directory);
 preferences.Load();
 preferences.Save(new("https://video.example.com", "voice.example.com", 64738, "alice", true));

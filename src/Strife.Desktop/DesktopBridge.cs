@@ -5,7 +5,8 @@ using System.Text.Json.Nodes;
 namespace Strife;
 
 public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voice, Uri origin, Action<string> publish,
-    Action? close = null, Func<string, Task<string>>? loadVideo = null, StreamingEngine? streaming = null, DownloadManager? downloads = null) : IDisposable
+    Action? close = null, Func<string, Task<string>>? loadVideo = null, StreamingEngine? streaming = null,
+    DownloadManager? downloads = null, AppUpdates? updates = null) : IDisposable
 {
     public string Token { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private readonly SemaphoreSlim gate = new(1);
@@ -40,6 +41,7 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
             else if (command == "ready")
             {
                 downloads?.Publish();
+                updates?.Publish();
                 if (streaming is not null) await streaming.StopAsync();
                 Send(new { type = "streaming", available = streaming?.Available == true });
                 Send(new { type = "preferences", value = preferences.Current,
@@ -48,6 +50,13 @@ public sealed class DesktopBridge(PreferencesStore preferences, VoiceEngine voic
                 if (voice.LastLog is { } log) publish(log.GetRawText());
                 Send(new { type = "engine", ready = voice.IsReady, error = voice.Failure });
                 Send(new { type = "result", id, ok = true });
+            }
+            else if (command == "updateInstall")
+            {
+                if (close is null || updates?.RequestRestart() != true)
+                    throw new InvalidOperationException("The update is not ready to install.");
+                Send(new { type = "result", id, ok = true });
+                close();
             }
             else if (command == "start")
             {

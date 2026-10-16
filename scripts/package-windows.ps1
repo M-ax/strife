@@ -47,7 +47,19 @@ foreach ($name in $downloads.Keys) {
 $redistVersion = (Get-Item (Join-Path $prerequisites 'VC_redist.x64.exe')).VersionInfo.FileVersion
 $redistVersion = [regex]::Match($redistVersion, '\d+\.\d+\.\d+\.\d+').Value
 if (!$redistVersion) { throw 'Cannot determine the bundled Visual C++ runtime version.' }
-& $InnoSetupCompiler "/DAppVersion=$Version" "/DAppNumericVersion=$($Version.Split('-')[0]).0" "/DPublishDir=$PublishDirectory" "/DPrerequisiteDir=$prerequisites" "/DReleaseDir=$release" "/DVCRedistVersion=$redistVersion" (Join-Path $root 'packaging/windows/Strife.iss')
+$channel = if ($Version.Contains('-')) { 'preview' } else { 'stable' }
+$velopack = Join-Path $root 'artifacts/velopack'
+Reset-StrifeStagingDirectory $velopack
+& dotnet tool restore
+if ($LASTEXITCODE) { throw 'Cannot restore pinned Velopack packaging tools.' }
+& dotnet vpk pack --packId Strife --packVersion $Version --packDir $PublishDirectory --mainExe Strife.exe --packTitle Strife --packAuthors Strife --channel $channel --runtime win-x64 --delta None --shortcuts StartMenuRoot --icon (Join-Path $root 'src/Strife.Desktop/wwwroot/assets/strife.ico') --outputDir $velopack
+if ($LASTEXITCODE) { throw 'Velopack packaging failed.' }
+$payloadSetup = @(Get-ChildItem $velopack -Filter '*Setup.exe')
+$package = @(Get-ChildItem $velopack -Filter '*-full.nupkg')
+if ($payloadSetup.Count -ne 1 -or $package.Count -ne 1) { throw 'Expected one Velopack installer and full update package.' }
+Copy-Item $package[0].FullName (Join-Path $release "Strife-$Version-full.nupkg")
+@{ minimumVcRuntime = $redistVersion } | ConvertTo-Json | Set-Content (Join-Path $release 'update-requirements.json')
+& $InnoSetupCompiler "/DAppVersion=$Version" "/DAppNumericVersion=$($Version.Split('-')[0]).0" "/DVelopackSetup=$($payloadSetup[0].FullName)" "/DPrerequisiteDir=$prerequisites" "/DReleaseDir=$release" "/DVCRedistVersion=$redistVersion" (Join-Path $root 'packaging/windows/Strife.iss')
 if ($LASTEXITCODE) { throw 'Windows installer compilation failed.' }
 $installer = Join-Path $release "Strife-$Version-win-x64-Setup.exe"
 if (!(Test-Path $installer)) { throw 'Inno Setup did not produce the expected installer.' }

@@ -13,48 +13,31 @@ AppUpdatesURL=https://github.com/M-ax/strife/releases
 DefaultDirName={localappdata}\Programs\Strife
 DefaultGroupName=Strife
 DisableProgramGroupPage=yes
+DisableDirPage=yes
+UsePreviousAppDir=no
+Uninstallable=no
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 MinVersion=10.0.19041
 WizardStyle=modern
 SetupIconFile=..\..\src\Strife.Desktop\wwwroot\assets\strife.ico
-UninstallDisplayIcon={app}\Strife.exe
-UninstallDisplayName=Strife
 OutputDir={#ReleaseDir}
 OutputBaseFilename=Strife-{#AppVersion}-win-x64-Setup
 VersionInfoVersion={#AppNumericVersion}
 Compression=lzma2
 SolidCompression=yes
-CloseApplications=yes
-CloseApplicationsFilter=*.exe,*.dll
+CloseApplications=no
 RestartApplications=no
 SetupLogging=yes
-
-[Tasks]
-Name: desktopicon; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Files]
 Source: "{#PrerequisiteDir}\VC_redist.x64.exe"; Flags: dontcopy
 Source: "{#PrerequisiteDir}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; Flags: dontcopy
-Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-[Icons]
-Name: "{autoprograms}\Strife"; Filename: "{app}\Strife.exe"; WorkingDir: "{app}"
-Name: "{autodesktop}\Strife"; Filename: "{app}\Strife.exe"; WorkingDir: "{app}"; Tasks: desktopicon
-
-[InstallDelete]
-; Clear replaced runtime/payload files during upgrades. User profiles live
-; outside {app} and are never included in install or uninstall deletion.
-Type: files; Name: "{app}\*.dll"
-Type: files; Name: "{app}\*.deps.json"
-Type: files; Name: "{app}\*.runtimeconfig.json"
-Type: filesandordirs; Name: "{app}\voice"
-Type: filesandordirs; Name: "{app}\wwwroot"
-Type: filesandordirs; Name: "{app}\docs"
+Source: "{#VelopackSetup}"; DestName: "Strife-Payload-Setup.exe"; Flags: dontcopy
 
 [Run]
-Filename: "{app}\Strife.exe"; Description: "Launch Strife"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: CanLaunch
+Filename: "{app}\current\Strife.exe"; Description: "Launch Strife"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: CanLaunch
 
 [Code]
 const
@@ -63,6 +46,7 @@ const
   UninstallKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{3AF3EC03-735A-4F65-9A4D-1C611D72D812}_is1';
 var
   PrerequisiteRestart: Boolean;
+  PackageInstalled: Boolean;
 
 function InitializeSetup: Boolean;
 var
@@ -73,13 +57,13 @@ begin
   Result := True;
   { Do not leave two installations and competing shortcuts. Never uninstall an
     all-user application from an unattended per-user update. }
-  if RegKeyExists(HKLM64, UninstallKey) or RegKeyExists(HKLM32, UninstallKey) then
+  if RegKeyExists(HKLM64, UninstallKey) or RegKeyExists(HKLM32, UninstallKey) or RegKeyExists(HKCU, UninstallKey) then
   begin
-    SuppressibleMsgBox('Strife is installed for all users. Close Strife and uninstall that installation in Windows Settings, then run this Setup again to install for your account. Your Strife profile will be preserved.', mbError, MB_OK, IDOK);
+    SuppressibleMsgBox('An older Strife installation is present. Close Strife and uninstall that installation in Windows Settings, then run this Setup again to enable per-user automatic updates. Your Strife profile will be preserved.', mbError, MB_OK, IDOK);
     Result := False;
     Exit;
   end;
-  if RegQueryStringValue(HKCU, UninstallKey, 'DisplayVersion', PreviousVersion) then
+  if RegQueryStringValue(HKCU, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Strife', 'DisplayVersion', PreviousVersion) then
   begin
     Suffix := Pos('-', PreviousVersion);
     if Suffix > 0 then Delete(PreviousVersion, Suffix, Length(PreviousVersion));
@@ -146,6 +130,8 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExitCode: Integer;
 begin
   Result := '';
   if not HasVCRuntime then
@@ -167,6 +153,18 @@ begin
     if Result <> '' then Exit;
     if not HasWebView2 then
       Result := 'Microsoft Edge WebView2 Runtime could not be verified. Install it and run Setup again.';
+  end;
+  if Result <> '' then Exit;
+  if not PackageInstalled then
+  begin
+    WizardForm.StatusLabel.Caption := 'Installing Strife for your account...';
+    ExtractTemporaryFile('Strife-Payload-Setup.exe');
+    if not Exec(ExpandConstant('{tmp}\Strife-Payload-Setup.exe'), '--silent --installto "' + ExpandConstant('{app}') + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+      Result := 'Could not start the Strife installer: ' + SysErrorMessage(ExitCode)
+    else if ExitCode <> 0 then
+      Result := 'Strife installation failed (exit code ' + IntToStr(ExitCode) + '). Close Strife and retry Setup.'
+    else PackageInstalled := True;
   end;
 end;
 

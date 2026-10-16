@@ -12,7 +12,9 @@
   <ItemGroup>
     <PackageReference Include="PhotinoX" Version="5.3.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="Velopack" Version="1.2.161" />
     <Content Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="streaming-quality.json" />
+    <EmbeddedResource Include="update-key.pem" />
   </ItemGroup>
 </Project>

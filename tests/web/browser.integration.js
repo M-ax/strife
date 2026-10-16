@@ -279,7 +279,7 @@ async function checkChannelTree(page) {
 
 test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube isolation', async () => {
   const video = createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<h1>Helltube fixture</h1><input placeholder="Room name">'); });
-  const assets = new Map(['index.html', 'app.js', 'downloads.js', 'sharing.js', 'sharing-quality.js', 'sharing-selection.js', 'helltube-embed.js', 'chat.js', 'appearance.js', 'font-picker.js', 'color-picker.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
+  const assets = new Map(['index.html', 'app.js', 'updates.js', 'downloads.js', 'sharing.js', 'sharing-quality.js', 'sharing-selection.js', 'helltube-embed.js', 'chat.js', 'appearance.js', 'font-picker.js', 'color-picker.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
   const server = createServer(async (req, res) => {
     const file = assets.get(req.url);
     if (!file) { res.writeHead(404); res.end(); return; }
@@ -367,6 +367,15 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     }, { videoUrl });
     await page.goto('http://127.0.0.1:' + server.address().port + '/#test-capability');
     await page.getByText('RNNoise · enabled').waitFor();
+    assert.equal(await page.locator('#update-button').isVisible(), false);
+    await page.evaluate(() => window.deliver({ type: 'update', available: true, value: { state: 'downloading', version: '0.1.0-preview.8', progress: 45 } }));
+    assert.equal(await page.locator('#update-button').textContent(), 'Update 45%');
+    assert.equal(await page.locator('#update-button').isDisabled(), true);
+    assert.equal(await page.locator('#notice').isVisible(), false, 'updates do not open notices');
+    await page.evaluate(() => window.deliver({ type: 'update', available: true, value: { state: 'ready', version: '0.1.0-preview.8' } }));
+    await page.locator('#update-button').click();
+    assert.equal(await page.evaluate(() => window.commands.filter(item => item.command === 'updateInstall').length), 1);
+    await page.evaluate(() => window.deliver({ type: 'update', available: true, value: { state: 'current' } }));
     await page.frameLocator('#helltube').getByRole('heading', { name: 'Helltube fixture' }).waitFor();
     assert.equal(await page.locator('.channel-user.talking').count(), 1);
     assert.equal(await page.locator('#self-name').textContent(), 'Alice');
