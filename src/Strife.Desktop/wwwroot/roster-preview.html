@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Strife · Voice roster preview</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="voice-icons.css">
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="roster-preview.css">
+  <script type="module" src="roster-preview.js"></script>
+</head>
+<body class="roster-preview">
+  <header class="appbar">
+    <div class="brand"><img class="brand-mark" src="assets/mark.svg" width="32" height="32" alt=""> STRIFE</div>
+    <span class="preview-tag">DESIGN LAB · DUMMY DATA</span>
+  </header>
+  <main class="preview-main">
+    <div class="preview-heading">
+      <span class="eyebrow">VOICE ROSTER</span>
+      <h1>A familiar face in the crowd.</h1>
+      <p class="muted">Live app styles, sample people. No microphone, server, or sign-in required.</p>
+    </div>
+    <div class="preview-layout">
+      <section class="preview-stage voice-pane" aria-label="Example voice channels">
+        <div class="rooms-content">
+          <div class="section-heading"><span class="eyebrow">YOUR SERVER</span><span class="dot live"></span></div>
+          <h2>After Hours</h2>
+          <p class="muted preview-server-note">A little company, a little co-op.</p>
+          <label class="search">⌕ <input id="channel-search" type="search" placeholder="Find a channel" aria-label="Find a channel"></label>
+          <div class="section-heading"><span class="eyebrow">VOICE CHANNELS</span><span id="user-count" class="muted"></span></div>
+          <div id="channel-tree" class="channel-tree" role="tree" aria-label="Server channel tree"></div>
+        </div>
+        <footer class="preview-footer">Click a room to move your example user.</footer>
+      </section>
+      <aside class="preview-controls" aria-labelledby="preview-controls-title">
+        <h2 id="preview-controls-title">Try the states</h2>
+        <label for="preview-self">Logged-in user<select id="preview-self"></select></label>
+        <label for="preview-state">Your voice state
+          <select id="preview-state">
+            <option value="idle">Listening</option>
+            <option value="talking">Speaking</option>
+            <option value="muted">Muted</option>
+            <option value="deafened">Muted + deafened</option>
+            <option value="deafened-only">Deafened only</option>
+          </select>
+        </label>
+        <label for="preview-width">Panel width <output id="preview-width-label" for="preview-width">320 px</output>
+          <input id="preview-width" type="range" min="240" max="480" step="10" value="320">
+        </label>
+        <label for="preview-accent">UI accent
+          <select id="preview-accent">
+            <option value="#00e0bb">Strife teal</option>
+            <option value="#b6a0ff">Lavender</option>
+            <option value="#7ebaff">Sky blue</option>
+          </select>
+        </label>
+        <button id="preview-reset">Reset examples</button>
+        <div class="preview-key">
+          <h3>At a glance</h3>
+          <p><span class="preview-self-mark" aria-hidden="true"></span>Your row · accent rail + filled avatar</p>
+          <p><span class="preview-speaking-mark" aria-hidden="true"></span>Speaking · green avatar ring</p>
+          <p><i class="voice-icon icon-microphone is-off" aria-hidden="true"></i>Muted</p>
+          <p><i class="voice-icon icon-headphones is-off" aria-hidden="true"></i>Deafened</p>
+        </div>
+        <p class="preview-note muted">Identity stays visible in every state. Long names truncate before the status icons; hover for the full name and status.</p>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>

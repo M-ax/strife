@@ -4,6 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark"><title>Strife</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="voice-icons.css">
   <link rel="stylesheet" href="app.css"><script type="module" src="app.js"></script>
 </head>
 <body>
@@ -42,7 +43,7 @@
       <header class="panel-header"></header>
       <div id="controls-content" class="voice-footer panel-body">
         <div class="identity"><span class="avatar" id="self-avatar">S</span><div><strong id="self-name">Not connected</strong><small id="transmit-status">Microphone offline</small></div></div>
-        <div class="voice-controls"><button id="mute-button" aria-pressed="false" disabled>♩ <span>Mute</span></button><button id="deafen-button" aria-pressed="false" disabled>◖◗ <span>Deafen</span></button><button data-native="settings" aria-label="Voice settings">⚙</button></div>
+        <div class="voice-controls"><button id="mute-button" aria-pressed="false" disabled><i class="voice-icon icon-microphone" aria-hidden="true"></i> <span>Mute</span></button><button id="deafen-button" aria-pressed="false" disabled><i class="voice-icon icon-headphones" aria-hidden="true"></i> <span>Deafen</span></button><button data-native="settings" aria-label="Voice settings">⚙</button></div>
         <div class="noise-status"><span id="noise-dot" class="dot"></span><span id="noise-label">Waiting for voice engine</span></div>
         <button id="ptt-hint" class="text-button" data-native="settings">Set a global PTT bind in Shortcuts ↗</button>
       </div>

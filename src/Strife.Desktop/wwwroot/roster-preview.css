@@ -1,0 +1,28 @@
+html:has(.roster-preview){height:auto;min-height:100%;overflow:auto}
+body.roster-preview{height:auto;min-height:100vh;overflow:visible}
+.preview-tag{font-size:10px;letter-spacing:1.5px;color:#a3a6b3}
+.preview-main{width:min(940px,100%);margin:0 auto;padding:42px 28px 56px}
+.preview-heading{margin-bottom:30px}
+.preview-heading h1{font-size:28px;letter-spacing:-.7px;white-space:normal;margin:12px 0}
+.preview-heading p{line-height:1.7;margin:0}
+.preview-layout{display:flex;align-items:flex-start;gap:48px;flex-wrap:wrap}
+.preview-stage{width:var(--roster-width,320px);max-width:100%;flex-shrink:0;border:1px solid #34353e;border-radius:12px;overflow:hidden;box-shadow:0 18px 50px #0003}
+.preview-stage h2{font-size:20px;letter-spacing:-.5px;font-weight:650;margin:14px 0 5px}
+.preview-server-note{font-size:11px;margin:0 0 4px}
+.preview-stage .rooms-content{overflow:visible;padding-top:22px}
+.preview-stage .channel-tree{overflow:visible;min-height:0}
+.preview-footer{padding:14px 16px;border-top:1px solid #30313b;color:#8f929f;font-size:10px;line-height:1.6}
+.preview-controls{flex:1;min-width:240px;max-width:300px;padding-top:4px}
+.preview-controls h2{font-size:16px;font-weight:600;margin:0 0 22px}
+.preview-controls>label{display:flex;flex-wrap:wrap;justify-content:space-between;gap:9px;margin:0 0 20px;color:#bfc0cb;font-size:12px}
+.preview-controls input[type=range]{width:100%;padding:0;accent-color:var(--accent-color);box-shadow:none}
+.preview-controls output{color:#8f929f;font-variant-numeric:tabular-nums}
+.preview-controls>button{width:100%;font-size:12px}
+.preview-key{border-top:1px solid #30313b;margin-top:28px;padding-top:20px}
+.preview-key h3{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:#858896;margin:0 0 18px}
+.preview-key p{display:flex;align-items:center;gap:12px;color:#bfc0cb;font-size:11px;margin:14px 0}
+.preview-key .voice-icon{color:#9b8779}
+.preview-self-mark{width:18px;height:18px;border-left:3px solid var(--accent-color);background:var(--accent-soft);border-radius:3px}
+.preview-speaking-mark{width:18px;height:18px;border:2px solid #8bd1a7;border-radius:7px}
+.preview-note{font-size:11px;line-height:1.8;margin-top:24px}
+@media(max-width:600px){.preview-main{padding:28px 18px}.preview-layout{gap:28px}.preview-tag{font-size:8px;letter-spacing:.8px}.preview-controls{max-width:none}.preview-heading h1{font-size:24px}}

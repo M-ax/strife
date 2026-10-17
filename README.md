@@ -51,6 +51,14 @@ Helltube server attachment downloads appear in a **Downloads** panel, collapsed 
 5. For global push to talk, choose **Push To Talk** in **Audio Input**, then add a **Push-to-Talk** action in **Shortcuts** and record a keyboard, mouse, or supported controller binding. This uses Mumble's OS-level shortcut engine and works while another app or the embedded video has focus. As with standard Mumble, shortcuts into elevated apps may require matching privileges.
 6. Choose **Helltube → Server** and enter your existing server URL, then sign in inside the video pane. Run the supplied Helltube checkout using its existing instructions (npm start after npm run build, normally port 3000). Strife does not start or change production servers.
 
+Starting with preview.9, your roster row has an accent rail, tinted background
+and filled avatar instead of a **YOU** badge. Speaking keeps its green avatar
+ring; muted and deafened states use separate, subdued microphone-off and
+headphones-off icons with tooltips and accessible labels. Both icons appear
+when both states are active. The user-panel buttons use the same bundled Nerd
+Font icons, with crossed-out versions for active mute/deafen states. Vertical
+collapsed panels place their expand and position buttons below the name.
+
 RNNoise is compiled in and selected by default in every new Strife profile, before audio starts. Later changes made in the native settings dialog persist. The status beneath the microphone controls reports the engine's actual setting. The audio wizard and certificate settings remain available in the menu. Native dialogs open above Strife; the underlying Mumble main window stays hidden, including after accepting settings.
 
 Chat messages go to the current voice channel. Incoming Mumble text and server notices preserve message line breaks without the native log's hidden spacer lines. URLs and named links are clickable and open through the system's browser or registered application. Embedded raster image attachments appear inline and scale to the chat pane. Click an image (or focus it and press Enter or Space) to open the image viewer. Switch between fit-to-window and actual size, and close with Escape, Close, or a click outside the viewer. Linked attachments keep a separate **Open image link** action. Unavailable, unsupported, or oversized attachments display a text placeholder; remote images and other rich HTML are not loaded in the desktop UI.
@@ -94,6 +102,23 @@ STRIFE_PROFILE overrides the profile directory, and STRIFE_VOICE_ENGINE override
 The desktop owns the voice process through a random, current-user-only named pipe (a private Unix socket on macOS/Linux) and a per-launch authentication token. Closing the desktop shuts down the voice process; a broken pipe also quits the engine. Audio, Opus, TLS, encrypted UDP, TCP voice tunneling, reconnection, jitter handling, and shortcuts remain upstream Mumble code.
 
 ## Validate
+
+### Voice roster design preview
+
+Run `npm run preview:roster`, then open <http://127.0.0.1:4173/roster-preview.html>.
+This standalone dummy-data page uses the same channel-list renderer, styles and
+bundled Nerd Font icons as the app; it never starts voice, requests microphone
+access, or connects to Mumble/Helltube. Change the logged-in user, voice state,
+panel width and accent; search, fold rooms, or click a room to move the sample
+user. **Reset examples** restores the fixture. Nothing is persisted.
+
+The four-glyph font is checked in and works offline, independently of the chosen
+UI font. Only to regenerate it, run `uv run scripts/subset-voice-icons.py`
+(requires [uv](https://docs.astral.sh/uv/)); the script verifies the pinned Nerd
+Fonts source checksum and uses pinned subsetting dependencies. Normal app builds
+do not need Python, uv or a font download.
+
+### Automated checks
 
     dotnet build Strife.slnx -c Release
     pwsh -NoProfile -File tests/native-build.tests.ps1

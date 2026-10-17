@@ -4,6 +4,149 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
+async function checkPanelHeader(page, id, vertical = false) {
+  const bounds = await page.locator(`[data-panel="${id}"]`).evaluate(panel => {
+    const header = panel.querySelector('.panel-header'), handle = panel.querySelector('.panel-handle');
+    const title = document.createRange(); title.selectNodeContents(handle);
+    const rect = node => node.getBoundingClientRect().toJSON();
+    return {
+      rail: panel.classList.contains('is-rail'), header: rect(header), handle: rect(handle),
+      title: title.getBoundingClientRect().toJSON(),
+      toggle: rect(panel.querySelector('.panel-collapse:not([hidden])')),
+      menu: rect(panel.querySelector('.panel-position')),
+      gripInset: handle.getBoundingClientRect().left - header.getBoundingClientRect().left + parseFloat(getComputedStyle(handle).paddingLeft)
+    };
+  });
+  assert.equal(bounds.rail, vertical);
+  if (vertical) {
+    assert.ok(bounds.toggle.top >= bounds.title.bottom, `${id}: expand is below the title`);
+    assert.ok(bounds.toggle.top - bounds.title.bottom < 16, `${id}: controls follow the name, not the rail's bottom`);
+    assert.ok(bounds.menu.top >= bounds.toggle.bottom, `${id}: options follow expand`);
+    assert.ok(bounds.menu.bottom <= bounds.header.bottom, `${id}: controls fit in the rail`);
+    for (const button of [bounds.toggle, bounds.menu]) {
+      assert.ok(button.left >= bounds.header.left && button.right <= bounds.header.right);
+    }
+  } else {
+    assert.equal(bounds.gripInset, 1, `${id}: grip has only one pixel of leading padding`);
+    assert.ok(bounds.menu.left >= bounds.handle.right, `${id}: horizontal controls stay beside the title`);
+  }
+}
+
+async function checkVoiceFont(page) {
+  const loaded = await page.evaluate(async () => {
+    const faces = await document.fonts.load('18px "Strife Voice Icons"', '\u{f02cb}\u{f036c}\u{f036d}\u{f07ce}');
+    return faces.map(face => face.status);
+  });
+  assert.deepEqual(loaded, ['loaded'], 'the bundled Nerd Font loads under the app CSP');
+}
+
+async function checkUserStates(page) {
+  const self = page.locator('.channel-user.is-self');
+  for (const talking of [false, true]) for (const muted of [false, true]) for (const deafened of [false, true]) {
+    await page.evaluate(flags => window.deliver({
+      type: 'state', connected: true, session: 7, ...flags,
+      channels: [{ id: 0, parent: -1, position: 0, name: 'Root' }],
+      users: [
+        { id: 7, name: 'Alice', channel: 0, ...flags },
+        { id: 8, name: 'Alice', channel: 0 },
+        { id: 9, name: '<img onerror=alert(1)>', channel: 0, deafened: true }
+      ]
+    }), { talking, muted, deafened });
+    assert.equal(await self.count(), 1, 'identity follows session ID, not display name or voice state');
+    assert.equal(await self.getAttribute('aria-label'), ['Alice', 'you', talking && 'speaking', muted && 'muted', deafened && 'deafened'].filter(Boolean).join(', '));
+    assert.equal(await self.locator('.icon-microphone.is-off').count(), Number(muted));
+    assert.equal(await self.locator('.icon-headphones.is-off').count(), Number(deafened));
+    assert.equal(await self.evaluate(row => row.classList.contains('talking')), talking);
+    assert.equal(await self.evaluate(row => getComputedStyle(row, '::before').width), '3px');
+    assert.equal(await self.locator('.user-avatar').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(0, 224, 187)');
+    assert.equal(await page.locator('#channel-tree img').count(), 0, 'user names remain plain text');
+    assert.equal(await page.locator('#channel-tree .user-badge').count(), 0);
+    assert.equal(await page.locator('#mute-button .is-off').count(), Number(muted));
+    assert.equal(await page.locator('#deafen-button .is-off').count(), Number(deafened));
+    assert.equal(await page.locator('#mute-button span').textContent(), muted ? 'Unmute' : 'Mute');
+    assert.equal(await page.locator('#deafen-button span').textContent(), deafened ? 'Undeafen' : 'Deafen');
+    for (const [id, pressed, glyph] of [
+      ['mute-button', muted, muted ? '\u{f036d}' : '\u{f036c}'],
+      ['deafen-button', deafened, deafened ? '\u{f07ce}' : '\u{f02cb}']
+    ]) {
+      const button = page.locator('#' + id), icon = button.locator('.voice-icon');
+      assert.equal(await button.getAttribute('aria-pressed'), String(pressed));
+      assert.equal(await icon.getAttribute('aria-hidden'), 'true');
+      assert.match(await icon.evaluate(node => getComputedStyle(node).fontFamily), /Strife Voice Icons/);
+      assert.equal(await icon.evaluate(node => getComputedStyle(node, '::before').content), `"${glyph}"`);
+      assert.equal(await icon.evaluate(node => getComputedStyle(node).color), pressed ? 'rgb(255, 203, 214)' : 'rgb(155, 135, 121)');
+    }
+  }
+  assert.equal(await self.locator('.user-status').getAttribute('aria-hidden'), 'true', 'row label announces states, not private-use glyphs');
+  assert.equal(await self.locator('.icon-microphone').getAttribute('title'), 'Muted');
+  assert.equal(await self.locator('.icon-headphones').getAttribute('title'), 'Deafened');
+  assert.equal(await self.locator('.icon-microphone').evaluate(node => getComputedStyle(node, '::before').content), '"\u{f036d}"');
+  assert.equal(await self.locator('.icon-headphones').evaluate(node => getComputedStyle(node, '::before').content), '"\u{f07ce}"');
+  await checkVoiceFont(page);
+  await page.evaluate(() => document.documentElement.style.setProperty('--ui-font', 'Georgia'));
+  assert.match(await self.locator('.voice-icon').first().evaluate(node => getComputedStyle(node).fontFamily), /Strife Voice Icons/);
+  await page.evaluate(() => document.documentElement.style.removeProperty('--ui-font'));
+}
+
+async function checkRosterPreview(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 1080, height: 1000 } });
+  const errors = [], requests = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('request', request => requests.push(request.url()));
+  try {
+    await page.goto(url);
+    const self = page.locator('.channel-user.is-self');
+    await self.waitFor();
+    await checkVoiceFont(page);
+    assert.equal(await page.locator('.channel-user').count(), 9);
+    assert.equal(await self.locator('.user-name').textContent(), 'M-ax');
+    await page.screenshot({ path: 'artifacts/roster-preview.png', fullPage: true });
+    for (const [value, icons, label] of [
+      ['talking', 0, 'speaking'], ['muted', 1, 'muted'], ['deafened', 2, 'muted, deafened'], ['deafened-only', 1, 'deafened'], ['idle', 0, 'you']
+    ]) {
+      await page.locator('#preview-state').selectOption(value);
+      assert.equal(await self.count(), 1);
+      assert.equal(await self.locator('.voice-icon').count(), icons);
+      assert.ok((await self.getAttribute('aria-label')).endsWith(label));
+    }
+    await page.locator('#preview-self').selectOption('12');
+    assert.equal(await page.locator('#preview-state').inputValue(), 'deafened');
+    await page.locator('#preview-width').fill('240');
+    await page.locator('#preview-accent').selectOption('#b6a0ff');
+    const bounds = await self.evaluate(row => {
+      const name = row.querySelector('.user-name'), status = row.querySelector('.user-status');
+      return { truncated: name.scrollWidth > name.clientWidth, overflow: row.scrollWidth > row.clientWidth,
+        statusRight: status.getBoundingClientRect().right, rowRight: row.getBoundingClientRect().right,
+        avatar: getComputedStyle(row.querySelector('.user-avatar')).backgroundColor,
+        statusColor: getComputedStyle(status).color };
+    });
+    assert.equal(bounds.truncated, true);
+    assert.equal(bounds.overflow, false);
+    assert.ok(bounds.statusRight <= bounds.rowRight);
+    assert.equal(bounds.avatar, 'rgb(182, 160, 255)');
+    assert.equal(bounds.statusColor, 'rgb(155, 135, 121)');
+    await page.screenshot({ path: 'artifacts/roster-preview-narrow.png', fullPage: true });
+    await page.getByRole('button', { name: 'Quiet corner', exact: true }).click();
+    assert.equal(await page.locator('.channel-row.current .join').textContent(), 'Quiet corner');
+    await page.getByRole('button', { name: 'Collapse Quiet corner', exact: true }).click();
+    assert.equal(await self.count(), 0);
+    await page.getByRole('searchbox', { name: 'Find a channel' }).fill('Cassiopeia');
+    assert.equal(await self.count(), 1, 'search reveals self inside a folded room');
+    await page.getByRole('button', { name: 'Reset examples', exact: true }).click();
+    assert.equal(await self.locator('.user-name').textContent(), 'M-ax');
+    assert.equal(await page.locator('#preview-width').inputValue(), '320');
+    assert.equal(await page.locator('#preview-state').inputValue(), 'idle');
+    assert.equal(await page.locator('#preview-accent').inputValue(), '#00e0bb');
+    assert.equal(await page.locator('#channel-search').inputValue(), '');
+    assert.equal(await page.locator('.channel-user').count(), 9);
+    await page.setViewportSize({ width: 375, height: 812 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.ok(requests.every(request => new URL(request).origin === new URL(url).origin), 'no server connections or external font requests');
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+}
+
 async function checkPreviewFontPermission(browser, url) {
   const page = await browser.newPage();
   try {
@@ -279,12 +422,14 @@ async function checkChannelTree(page) {
 
 test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube isolation', async () => {
   const video = createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<h1>Helltube fixture</h1><input placeholder="Room name">'); });
-  const assets = new Map(['index.html', 'app.js', 'updates.js', 'downloads.js', 'sharing.js', 'sharing-quality.js', 'sharing-selection.js', 'helltube-embed.js', 'chat.js', 'appearance.js', 'font-picker.js', 'color-picker.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
+  const assets = new Map(['index.html', 'app.js', 'channel-tree.js', 'voice-icons.css', 'assets/fonts/strife-voice.woff2',
+    'roster-preview.html', 'roster-preview.js', 'roster-preview.css',
+    'updates.js', 'downloads.js', 'sharing.js', 'sharing-quality.js', 'sharing-selection.js', 'helltube-embed.js', 'chat.js', 'appearance.js', 'font-picker.js', 'color-picker.js', 'model.js', 'layout.js', 'layout-model.js', 'app.css', 'assets/mark.svg', 'assets/favicon.svg'].map(name => ['/' + (name === 'index.html' ? '' : name), name]));
   const server = createServer(async (req, res) => {
     const file = assets.get(req.url);
     if (!file) { res.writeHead(404); res.end(); return; }
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src http: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
-    res.setHeader('Content-Type', file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : file.endsWith('.svg') ? 'image/svg+xml' : 'text/html');
+    res.setHeader('Content-Type', file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : file.endsWith('.svg') ? 'image/svg+xml' : file.endsWith('.woff2') ? 'font/woff2' : 'text/html');
     res.end(await readFile(new URL('../../src/Strife.Desktop/wwwroot/' + file, import.meta.url)));
   });
   await new Promise(resolve => video.listen(0, '127.0.0.1', resolve));
@@ -398,6 +543,7 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     await page.getByRole('button', {name: 'Collapse Downloads', exact: true}).click();
     await checkAppearance(page);
     await checkChannelTree(page);
+    await checkUserStates(page);
     await page.evaluate(() => window.deliver({ type: 'state', connected: true, session: 7,
       channels: [], users: [{ id: 7, name: 'Server display name', channel: 0 }] }));
     assert.equal(await page.locator('#self-name').textContent(), 'Server display name');
@@ -410,6 +556,7 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     await page.getByText('RNNoise · enabled').waitFor();
     await page.frameLocator('#helltube').getByRole('heading', { name: 'Helltube fixture' }).waitFor();
     const before = await page.locator('#helltube').boundingBox();
+    for (const id of ['rooms', 'chat', 'controls', 'video', 'downloads']) await checkPanelHeader(page, id);
     // Header controls share a 30px halo, even when the pointer is outside their panel.
     const titleBounds = () => page.locator('#chat-pane .panel-handle').evaluate(handle => {
       const range = document.createRange(); range.selectNodeContents(handle); return range.getBoundingClientRect().toJSON();
@@ -438,6 +585,11 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     const rail = await page.locator('#chat-pane .panel-header').boundingBox();
     await checkHeaderFade(rail.x - 15, rail.y + rail.height / 2, .5);
     await checkHeaderFade(rail.x + rail.width / 2, rail.y + rail.height / 2, 1);
+    await checkPanelHeader(page, 'chat', true);
+    await page.getByRole('button', { name: 'Position Voice chat', exact: true }).click();
+    assert.equal(await page.locator('#panel-position-menu').isVisible(), true);
+    await page.keyboard.press('Escape');
+    await page.locator('#chat-pane').screenshot({ path: 'artifacts/panel-header-rail.png' });
     await page.getByRole('button', { name: 'Expand chat', exact: true }).click();
     await page.evaluate(() => window.deliver({ type: 'log', text: '<img src=x onerror="window.pwned=true"> unsafe server text' }));
     assert.equal(await page.locator('#chat-log img').count(), 0);
@@ -646,6 +798,7 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     assert.ok(resized.width < floatBefore.width - 30 && resized.height < floatBefore.height - 40);
     await page.locator('#collapse-chat').click();
     assert.ok((await box('chat')).height < 50);
+    await checkPanelHeader(page, 'chat');
     await page.locator('#expand-chat').click();
     assert.deepEqual(await box('chat'), resized, 'floating expand restores bounds');
     await page.reload();
@@ -667,6 +820,20 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
       await page.getByRole('button', { name: 'Expand ' + title, exact: true }).click();
       assert.equal(await page.locator('[data-panel="' + id + '"] .panel-body').isVisible(), true);
     }
+    for (const [id, title] of [['rooms', 'Mumble rooms'], ['chat', 'Voice chat'], ['controls', 'User controls'], ['video', 'Helltube'], ['downloads', 'Downloads']]) {
+      await resetLayout();
+      await page.getByRole('button', { name: 'Position ' + title, exact: true }).click();
+      await page.getByRole('button', { name: 'Dock right', exact: true }).click();
+      if (id !== 'downloads') await page.locator(`[data-panel="${id}"] .panel-collapse:not([hidden])`).click();
+      await checkPanelHeader(page, id, true);
+      await page.getByRole('button', { name: 'Position ' + title, exact: true }).focus();
+      await page.keyboard.press('Enter');
+      assert.equal(await page.locator('#panel-position-menu').isVisible(), true);
+      await page.keyboard.press('Escape');
+      await page.locator(`[data-panel="${id}"] .panel-collapse:not([hidden])`).click();
+      assert.equal(await page.locator(`[data-panel="${id}"] .panel-body`).isVisible(), true);
+    }
+    await resetLayout();
     // Position menu and divider both work without pointer gestures.
     await page.getByRole('button', { name: 'Position User controls', exact: true }).focus();
     await page.keyboard.press('Enter');
@@ -729,6 +896,7 @@ test('desktop UI: channel events, safe chat, pane collapse, menus, and Helltube 
     await page.screenshot({ path: 'artifacts/strife-ui.png' });
     assert.deepEqual(errors, []);
     await checkPreviewFontPermission(browser, 'http://127.0.0.1:' + server.address().port + '/');
+    await checkRosterPreview(browser, 'http://127.0.0.1:' + server.address().port + '/roster-preview.html');
   } finally {
     await browser?.close();
     await Promise.all([new Promise(resolve => server.close(resolve)), new Promise(resolve => video.close(resolve))]);

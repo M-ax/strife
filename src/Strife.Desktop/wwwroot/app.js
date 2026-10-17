@@ -1,4 +1,5 @@
-import { organizeChannels, validateVideoUrl } from './model.js';
+import { validateVideoUrl } from './model.js';
+import { createChannelTree } from './channel-tree.js';
 import { createWorkspace } from './layout.js';
 import { renderChat } from './chat.js';
 import { createAppearanceSettings } from './appearance.js';
@@ -10,7 +11,8 @@ const $ = id => document.getElementById(id);
 // Keep the per-launch capability in this history entry so F5 can reattach.
 const token = location.hash.slice(1) || history.state?.strifeToken || '';
 history.replaceState({ strifeToken: token }, '', location.pathname);
-const pending = new Map(), folded = new Set(), expandedEmpty = new Set();
+const pending = new Map();
+const channelTree = createChannelTree($('channel-tree'), channel => run('join', { channel }).catch(() => {}));
 let state = { connected: false, channels: [], users: [] };
 let preferences = {}, engineReady = false, currentVideo = '', lastLog = '', startPending = false;
 const native = window.external && typeof window.external.sendMessage === 'function';
@@ -58,7 +60,6 @@ function loadVideo(value) {
   $('video-address').textContent = new URL(preferences.helltubeUrl || url).host;
 }
 function showState(next) {
-  if (!next.connected) { folded.clear(); expandedEmpty.clear(); }
   state = next;
   const self = state.users.find(user => user.id === state.session);
   const channel = state.channels.find(channel => channel.id === self?.channel);
@@ -78,6 +79,7 @@ function showState(next) {
     state.transmitMode === 2 ? 'PTT needs a bind · open Shortcuts ↗' : 'Set a global PTT bind in Shortcuts ↗';
   for (const [id, value] of [['mute-button', state.muted], ['deafen-button', state.deafened]]) {
     $(id).disabled = !engineReady; $(id).setAttribute('aria-pressed', String(!!value));
+    $(id).querySelector('.voice-icon').classList.toggle('is-off', !!value);
   }
   $('mute-button').querySelector('span').textContent = state.muted ? 'Unmute' : 'Mute';
   $('deafen-button').querySelector('span').textContent = state.deafened ? 'Undeafen' : 'Deafen';
@@ -88,64 +90,7 @@ function showState(next) {
   renderTree();
 }
 function renderTree() {
-  const tree = $('channel-tree'), fragment = document.createDocumentFragment();
-  const self = state.users.find(user => user.id === state.session);
-  const query = $('channel-search').value.trim();
-  const active = document.activeElement?.dataset?.treeFocus;
-  function appendSiblings(nodes, parent, key) {
-    if (query) { nodes.forEach(node => append(node, parent)); return; }
-    const empty = [];
-    for (const node of nodes) {
-      if (node.populated) append(node, parent); else empty.push(node);
-    }
-    if (!empty.length) return;
-    const expanded = expandedEmpty.has(key);
-    const label = empty.length + (empty.length === 1 ? ' channel' : ' channels');
-    const row = document.createElement('div'); row.className = 'channel-row empty-channels';
-    row.setAttribute('role', 'treeitem'); row.setAttribute('aria-label', label);
-    const toggle = document.createElement('button'); toggle.className = 'empty-channels-toggle';
-    toggle.textContent = label; toggle.dataset.treeFocus = 'empty:' + key;
-    toggle.setAttribute('aria-label', (expanded ? 'Collapse ' : 'Expand ') + empty.length + (empty.length === 1 ? ' empty channel' : ' empty channels'));
-    toggle.setAttribute('aria-expanded', String(expanded));
-    toggle.onclick = () => { if (expanded) expandedEmpty.delete(key); else expandedEmpty.add(key); renderTree(); };
-    row.append(toggle); parent.append(row);
-    // The disclosure and its rooms are siblings; only real channel hierarchy adds indentation.
-    if (expanded) empty.forEach(node => append(node, parent));
-  }
-  function append(node, parent) {
-    const item = document.createElement('div'); item.setAttribute('role', 'treeitem'); item.setAttribute('aria-label', node.name);
-    const row = document.createElement('div'); row.className = 'channel-row' + (node.id === self?.channel ? ' current' : '');
-    const fold = document.createElement('button'); fold.className = 'fold';
-    const collapsed = folded.has(node.id) && !query;
-    fold.dataset.treeFocus = 'fold:' + node.id;
-    fold.disabled = !node.children.length && !node.users.length;
-    fold.setAttribute('aria-label', (collapsed ? 'Expand ' : 'Collapse ') + node.name);
-    fold.setAttribute('aria-expanded', String(!collapsed));
-    fold.onclick = () => { if (folded.has(node.id)) folded.delete(node.id); else folded.add(node.id); renderTree(); };
-    const join = document.createElement('button'); join.className = 'join'; join.dataset.channel = String(node.id);
-    join.dataset.treeFocus = 'join:' + node.id;
-    join.textContent = node.name; join.title = 'Join ' + node.name; join.disabled = !state.connected;
-    join.onclick = () => run('join', { channel: node.id }).catch(() => {});
-    row.append(fold, join); item.append(row);
-    if (!collapsed) {
-      for (const user of node.users) {
-        const line = document.createElement('div'); line.className = 'channel-user' + (user.talking ? ' talking' : '');
-        line.setAttribute('role', 'treeitem'); line.setAttribute('aria-label', user.name + (user.talking ? ', speaking' : '') + (user.muted ? ', muted' : ''));
-        const avatar = document.createElement('span'); avatar.className = 'user-avatar'; avatar.textContent = user.name.slice(0, 2).toUpperCase();
-        const name = document.createElement('span'); name.className = 'user-name'; name.textContent = user.name;
-        const badge = document.createElement('span'); badge.className = 'user-badge'; badge.textContent = user.deafened ? 'DEAF' : user.muted ? 'MUTED' : user.id === state.session ? 'YOU' : '';
-        line.append(avatar, name, badge); item.append(line);
-      }
-      const children = document.createElement('div'); children.className = 'channel-group'; children.setAttribute('role', 'group');
-      appendSiblings(node.children, children, node.id); item.append(children);
-    }
-    parent.append(item);
-  }
-  const roots = organizeChannels(state.connected ? state.channels : [], state.users, query);
-  // Keep the server's root visible even when everyone is offline.
-  if (roots.length === 1) append(roots[0], fragment); else appendSiblings(roots, fragment, 'root');
-  tree.replaceChildren(fragment);
-  if (active) tree.querySelector('[data-tree-focus="' + CSS.escape(active) + '"]')?.focus({ preventScroll: true });
+  channelTree.render(state, $('channel-search').value);
   $('voice-empty').hidden = state.connected;
 }
 function receive(raw) {

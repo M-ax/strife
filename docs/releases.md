@@ -13,6 +13,30 @@ All four native builds must succeed before any assets are attached. Rerunning th
 
 The ZIP/tar archives include .NET, the voice engine, UI assets and dependency notices. The Windows portable ZIP needs WebView2 and the VC++ runtime already installed; the setup executable embeds both standalone redistributables for offline installation. Their Microsoft Authenticode signatures are verified during packaging. The installer checks runtime presence/version, reports prerequisite failures, handles restart requests, provides shortcuts and Apps & Features registration, removes obsolete runtime files on upgrade, rejects numeric version downgrades, and preserves profiles on uninstall.
 
+## Preview 0.1.0-preview.9: Clearer voice status and panel headers
+
+The logged-in user's channel-list row now has an accent rail, tinted background
+and filled avatar instead of a **YOU** badge. This identity marker stays visible
+while speaking, muted or deafened. Muted and deafened users have separate,
+subdued microphone-off and headphones-off icons; both appear when both states
+are active. User-panel buttons use the same Nerd Font family, with crossed-out
+icons for active mute/deafen states. The small bundled font works offline and
+does not depend on an installed font or the selected UI font.
+
+Panel drag grips have minimal leading padding. Vertical collapsed panels place
+the expand button and position menu directly below the panel name. Existing
+panel dragging, keyboard controls, saved layouts and hover behavior are retained.
+A standalone dummy-data roster preview is available with `npm run preview:roster`
+for design iteration without starting voice or connecting to a server.
+
+These are web UI and documentation changes only. Reuse the unchanged pinned
+Mumble payloads from preview.8, including its Xbox reconnect backport, and run
+the normal package/startup checks on Windows, Linux and both macOS targets.
+Publish all five installer/archive packages and the signed Windows OTA package
+before deploying the updated website. Runtime requirements, signing limitations,
+per-user installation and OTA behavior are unchanged; the development-only
+native streaming helper is still not bundled.
+
 ## Preview 0.1.0-preview.8: Windows Xbox Wireless reconnects
 
 This release fixes the reported Xbox Wireless controller shutoff on input after

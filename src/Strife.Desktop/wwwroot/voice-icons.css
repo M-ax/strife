@@ -1,0 +1,21 @@
+/* Four Material Design glyphs from Symbols Nerd Font v3.4.0.
+   See assets/fonts/LICENSE.txt and scripts/subset-voice-icons.py. */
+@font-face {
+  font-family: "Strife Voice Icons";
+  src: url("assets/fonts/strife-voice.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+.voice-icon {
+  display: inline-block;
+  width: 1em;
+  flex-shrink: 0;
+  font: normal 400 18px/1 "Strife Voice Icons";
+  text-align: center;
+  vertical-align: -.15em;
+}
+.icon-microphone::before { content: "\f036c"; }
+.icon-microphone.is-off::before { content: "\f036d"; }
+.icon-headphones::before { content: "\f02cb"; }
+.icon-headphones.is-off::before { content: "\f07ce"; }
