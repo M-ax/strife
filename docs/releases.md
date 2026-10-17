@@ -13,6 +13,26 @@ All four native builds must succeed before any assets are attached. Rerunning th
 
 The ZIP/tar archives include .NET, the voice engine, UI assets and dependency notices. The Windows portable ZIP needs WebView2 and the VC++ runtime already installed; the setup executable embeds both standalone redistributables for offline installation. Their Microsoft Authenticode signatures are verified during packaging. The installer checks runtime presence/version, reports prerequisite failures, handles restart requests, provides shortcuts and Apps & Features registration, removes obsolete runtime files on upgrade, rejects numeric version downgrades, and preserves profiles on uninstall.
 
+## Preview 0.1.0-preview.8: Windows Xbox Wireless reconnects
+
+This release fixes the reported Xbox Wireless controller shutoff on input after
+reconnecting while Strife is running. The native shortcut worker polls XInput
+even without raw input events, releases held buttons on disconnect, and accepts
+reused packet numbers on reconnect. Controller shortcuts remain enabled; no
+Windows driver bypass or controller firmware change is required.
+
+The [reconnect backport](windows-xinput-reconnect.md) retains the pinned Mumble
+revision and dependency environment. Its native input changes require fresh
+voice engines; stale cached payloads are rejected by packaging and startup
+checks. The reported setup passed reconnect/input testing with both the original
+Mumble candidate and the packaged Strife backport.
+
+Publish the complete validated Windows, Linux and macOS package set, including
+the signed Windows OTA package, before updating the website. Per-user Windows
+installation, OTA behavior, runtime requirements and signing limitations remain
+unchanged from preview.7. The development-only native streaming helper is still
+not bundled.
+
 ## Preview 0.1.0-preview.7: Windows OTA updates
 
 Setup defaults to `%LOCALAPPDATA%\Programs\Strife` and registers shortcuts and uninstall information for the current user. Run it normally, not as administrator. Existing legacy installations must be uninstalled explicitly before installing the updater-capable version; Setup refuses to create competing installations. Existing profiles are preserved by uninstall. Inno Setup supplies offline prerequisites and bootstraps the pinned Velopack installer; Velopack owns subsequent file replacement and removal.
@@ -66,7 +86,9 @@ The platform requirements, prerequisite bundles, and signing status above are un
 
 Release jobs first restore the complete compiled voice payload for their platform, including its libraries, resources and license notices. On an exact cache hit they skip the Mumble checkout, native compiler toolchain restore, build-tool installation and C++ compilation. Linux still installs runtime libraries needed to launch the packaged app and engine. Managed/web tests, packaging, native startup checks and Windows installer checks run on every release, including cache hits.
 
-The cache key depends only on the runtime, the native bridge, the native build/preparation scripts and the pinned dependency manifest. App versions, desktop C# and web UI changes, documentation, packaging scripts and workflow edits do not invalidate it. The current key format is preserved so the engines built for preview.3 can be reused immediately. The workflow's job summary states whether it reused Mumble or rebuilt it.
+The cache key depends only on the runtime, the files under `native/` (including the bridge, backports and build helpers), the native build/preparation scripts and the pinned dependency manifest. App versions, desktop C# and web UI changes, documentation outside `native/`, packaging scripts and workflow edits do not invalidate it. The key format is unchanged, but the Xbox reconnect backport changes its native inputs and intentionally requires a fresh engine. The workflow's job summary states whether it reused Mumble or rebuilt it.
+
+Fresh voice payloads record `nativeInputsSha256` in `build-info.json`. Publishing, donor recovery and extracted-package checks require that fingerprint, the pinned Mumble revision and the target runtime to match. Missing or stale provenance is rejected before packaging or startup. Text input hashes normalize Git checkout line endings, so equivalent LF/CRLF checkouts do not invalidate a payload. This fingerprint is build provenance, not a substitute for package hashes or signatures.
 
 If GitHub evicts a compiled cache, the workflow can recover the unchanged engine
 from the validated Actions run pinned in `packaging/voice-release.json`. Recovery
@@ -90,7 +112,7 @@ Use PowerShell 7 on the target OS and architecture. Cross-publishing the managed
 ./scripts/test-package.ps1 -Runtime win-x64
 ```
 
-`prepare-release.ps1` checks out Mumble and its submodules at the revision in `packaging/native-dependencies.json`, and fetches the corresponding upstream vcpkg environment after verifying its pinned SHA-256. The toolchain cache is keyed by that manifest. To update a dependency, update the pinned revision/archive/hash together and rebuild from clean native build/source/toolchain directories. The existing local Mumble/vcpkg overrides are also supported by `build-voice.ps1` (`-MumbleSource`, `-VcpkgRoot`, `-Generator`, `-Parallel`); `STRIFE_MUMBLE_SOURCE` and `STRIFE_VCPKG_ROOT` supply defaults.
+`prepare-release.ps1` checks out Mumble and its submodules at the revision in `packaging/native-dependencies.json`, and fetches the corresponding upstream vcpkg environment after verifying its pinned SHA-256. The toolchain cache is keyed by that manifest. `build-voice.ps1` applies the checked-in Windows reconnect backport to a private snapshot and fails if its source context no longer matches. To update a dependency, review that backport, update the pinned revision/archive/hash together and rebuild from clean native build/source/toolchain directories. Local Mumble/vcpkg overrides are supported by `build-voice.ps1` (`-MumbleSource`, `-VcpkgRoot`, `-Generator`, `-Parallel`); the Mumble checkout must use the pinned revision. `STRIFE_MUMBLE_SOURCE` and `STRIFE_VCPKG_ROOT` supply defaults.
 
 On macOS, install Ninja and xz with Homebrew (`brew install ninja xz`) and install the Xcode command-line tools. On Ubuntu 24.04 the workflow installs the native build dependencies with:
 
@@ -117,7 +139,7 @@ tar -xzf Strife-VERSION-linux-x64.tar.gz
 ./Strife/Strife
 ```
 
-Use `-BuildVoice` with publish to rebuild native code first, or `-NoPackage` to publish only the runnable directory. `-OutputDirectory` accepts an empty destination; the default disposable `artifacts/Strife` is rebuilt on every publish to exclude stale files. `-VoiceDirectory` selects an already staged engine; its build metadata must match the runtime. `-InnoSetupCompiler` overrides the ISCC path. `-PrerequisiteDirectory` can supply cached Microsoft offline installers. Packages are always written to `artifacts/release`.
+Use `-BuildVoice` with publish to rebuild native code first, or `-NoPackage` to publish only the runnable directory. `-OutputDirectory` accepts an empty destination; the default disposable `artifacts/Strife` is rebuilt on every publish to exclude stale files. `-VoiceDirectory` selects an already staged engine; its build metadata must match the runtime, pinned source and current native input fingerprint. `-InnoSetupCompiler` overrides the ISCC path. `-PrerequisiteDirectory` can supply cached Microsoft offline installers. Packages are always written to `artifacts/release`.
 
 ## Validation and signing
 

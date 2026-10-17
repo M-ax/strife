@@ -11,6 +11,9 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path $PSScriptRoot -Parent
+. (Join-Path $root 'native/voice-build.ps1')
+$nativeInputHash = Get-StrifeVoiceBuildHash $root
+$pins = Get-Content (Join-Path $root 'packaging/native-dependencies.json') -Raw | ConvertFrom-Json
 if (!$MumbleSource) {
     $MumbleSource = Join-Path $root 'artifacts/upstream/mumble'
     if ($IsWindows -and !(Test-Path $MumbleSource)) { $MumbleSource = 'C:\Users\Max\CLionProjects\mumble' }
@@ -30,6 +33,7 @@ New-Item -ItemType Directory -Force $source | Out-Null
 $stamp = Join-Path $root 'artifacts/mumble-revision.txt'
 $revision = (& git -C $MumbleSource rev-parse HEAD).Trim()
 if ($LASTEXITCODE) { throw 'Cannot resolve Mumble source revision.' }
+if ($revision -ne $pins.mumbleRevision) { throw 'Use the pinned Mumble revision from packaging/native-dependencies.json.' }
 if (!(Test-Path $stamp) -or $RefreshSource) {
     if ($IsWindows) {
         & robocopy $MumbleSource $source /E /XD .git .idea .junie .ollamassist cmake-build-debug build /XF asdf.txt /NFL /NDL /NJH /NJS /NP | Out-Null
@@ -42,11 +46,7 @@ if (!(Test-Path $stamp) -or $RefreshSource) {
 } elseif ((Get-Content $stamp -Raw).Trim() -ne $revision) {
     throw 'Mumble HEAD changed. Use -RefreshSource to update the private source snapshot.'
 }
-function Write-Changed([string]$Path, [string]$Content) {
-    if (!(Test-Path $Path) -or [IO.File]::ReadAllText($Path) -cne $Content) {
-        [IO.File]::WriteAllText($Path, $Content)
-    }
-}
+Update-StrifeXInputSources $root $MumbleSource $source
 foreach ($name in @('StrifeBridge.h', 'StrifeBridge.cpp')) {
     Write-Changed (Join-Path $source "src/mumble/$name") ([IO.File]::ReadAllText((Join-Path $root "native/$name")))
 }
@@ -98,6 +98,9 @@ $targets = @('mumble')
 if ($WithServer) { $targets += 'mumble-server' }
 & cmake --build $build --config Release --target $targets --parallel $Parallel
 if ($LASTEXITCODE) { throw 'Native build failed.' }
+if ((Get-StrifeVoiceBuildHash $root) -ne $nativeInputHash) {
+    throw 'Native inputs changed during the build; rebuild before staging the voice engine.'
+}
 $destination = Join-Path $root 'artifacts/voice'
 Reset-StrifeStagingDirectory $destination
 if ($IsWindows) {
@@ -123,6 +126,7 @@ Get-ChildItem (Join-Path $VcpkgRoot "installed/$triplet/share") -Directory | For
     $copyright = Join-Path $_.FullName 'copyright'
     if (Test-Path $copyright) { Copy-Item $copyright (Join-Path $licenseDirectory "$($_.Name).txt") -Force }
 }
-@{ runtime = if ($IsWindows) { 'win-x64' } elseif ($IsMacOS) { "osx-$architecture" } else { "linux-$architecture" }; revision = $revision } |
+@{ runtime = if ($IsWindows) { 'win-x64' } elseif ($IsMacOS) { "osx-$architecture" } else { "linux-$architecture" };
+    revision = $revision; nativeInputsSha256 = $nativeInputHash } |
     ConvertTo-Json | Set-Content (Join-Path $destination 'build-info.json')
 Write-Host "Voice engine ready: $destination"

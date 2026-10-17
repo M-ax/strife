@@ -15,7 +15,9 @@ The native build script defaults to the provided Mumble checkout and vcpkg insta
 
     ./scripts/build-voice.ps1 -MumbleSource C:/path/to/mumble -VcpkgRoot C:/path/to/vcpkg
 
-Initialize Mumble's submodules before building. The tested source revision is f1954599ec510a4eb894106f79631f7ff8f1b6a1. The script copies the source into artifacts/mumble-source, adds a small control adapter, and builds artifacts/voice/strife-voice.exe. It does not edit the original Mumble checkout. Subsequent builds reuse that snapshot; -RefreshSource refreshes it after upstream changes. Patch anchors are checked before changing startup/default settings.
+Initialize Mumble's submodules before building. The pinned source revision is f1954599ec510a4eb894106f79631f7ff8f1b6a1. The script copies the source into artifacts/mumble-source, applies the Windows Xbox reconnect backport, adds a small control adapter, and builds artifacts/voice/strife-voice.exe. It does not edit the original Mumble checkout. Subsequent builds reuse that snapshot; patch preparation starts from pristine inputs and preserves unchanged file timestamps. Local source overrides must use the pinned revision. Patch anchors are checked before changing startup/default settings.
+
+Source builds include the [Xbox Wireless reconnect fix](docs/windows-xinput-reconnect.md) while retaining controller shortcuts. This requires a fresh native voice build; an older cached engine is not sufficient. It is not a claim that an already published installer contains the fix.
 
 Required vcpkg components include Qt6 base/SVG/tools/translations, Boost, OpenSSL, Protobuf, libsndfile, Opus, CLI11, and spdlog, using x64-windows-static-md. SpeexDSP and RNNoise (including its model) are built from Mumble's bundled sources. The optional local test server also requires SQLite and SOCI's bundled source. The script disables overlay, plugin builds, automatic LAN discovery, Ice, and server D-Bus. Hostname/IP connections and the native audio/network/shortcut implementations are retained.
 
@@ -94,6 +96,7 @@ The desktop owns the voice process through a random, current-user-only named pip
 ## Validate
 
     dotnet build Strife.slnx -c Release
+    pwsh -NoProfile -File tests/native-build.tests.ps1
     dotnet run --project tests/Strife.Tests -c Release
     npm ci
     npm test

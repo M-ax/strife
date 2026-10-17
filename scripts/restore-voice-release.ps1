@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 . (Join-Path $PSScriptRoot 'release-common.ps1')
+. (Join-Path $root 'native/voice-build.ps1')
 $baseline = Get-Content (Join-Path $root 'packaging/voice-release.json') -Raw | ConvertFrom-Json
 if ($baseline.sourceRef -notmatch '^[a-f0-9]{40}$') { throw 'Invalid voice recovery source ref.' }
 function Write-Result([string]$Name, [string]$Value) {
@@ -64,8 +65,7 @@ try {
         $source = Join-Path $stage 'Strife/voice'
     }
     $info = Get-Content (Join-Path $source 'build-info.json') -Raw | ConvertFrom-Json
-    $pins = Get-Content (Join-Path $root 'packaging/native-dependencies.json') -Raw | ConvertFrom-Json
-    if ($info.runtime -ne $Runtime -or $info.revision -ne $pins.mumbleRevision) { throw 'Voice donor runtime or source revision mismatch.' }
+    Assert-StrifeVoiceBuildInfo $root $info $Runtime
     New-Item -ItemType Directory -Force $destination | Out-Null
     if ($IsMacOS) {
         # The shipped bundle links Resources/voice to Contents/Helpers. Restore

@@ -152,6 +152,8 @@ jobs:
           key: ${{ steps.voice-cache.outputs.cache-primary-key }}
       - name: Run managed and web tests
         run: |
+          pwsh -NoProfile -File ./tests/native-build.tests.ps1
+          if ($LASTEXITCODE) { throw 'Native build recipe tests failed.' }
           dotnet run --project tests/Strife.Tests -c Release
           if ($LASTEXITCODE) { throw 'Managed tests failed.' }
           npm ci

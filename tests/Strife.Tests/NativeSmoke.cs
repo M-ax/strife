@@ -17,6 +17,7 @@ internal static class NativeSmoke
         while (checkout is not null && !File.Exists(Path.Combine(checkout.FullName, "Strife.slnx"))) checkout = checkout.Parent;
         var root = checkout?.FullName ?? throw new DirectoryNotFoundException("Run the native test from the Strife source tree.");
         var serverPath = Path.Combine(root, "artifacts", "mumble-build", "Release", "mumble-server.exe");
+        if (!File.Exists(serverPath)) serverPath = Path.Combine(root, "artifacts", "mumble-build", "mumble-server.exe");
         if (!File.Exists(serverPath)) throw new FileNotFoundException("Build with scripts/build-voice.ps1 -WithServer first.");
         var directory = Path.Combine(root, "artifacts", "integration", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);

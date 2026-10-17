@@ -1,0 +1,726 @@
+Windows XInput reconnect backport for Mumble f1954599ec510a4eb894106f79631f7ff8f1b6a1.
+Based on M-ax/mumble commits ed1a86f04edd5d269548181805f86998f441084e,
+21c9f7b062f0bb4b6ed69d42728ab79a6fa6a2c5, and
+d761e22a5f72054c75cb2c2051883cc1f14bacf7.
+
+Adaptation: use a mutex-protected std::deque instead of upgrading the pinned
+SPSC queue dependency. Ordinary input remains bounded; removal notifications
+remain ordered and are not dropped on input-queue saturation. Keep the pinned
+UTF-8 header and object-library test target.
+
+diff --git a/src/mumble/GlobalShortcut_win.cpp b/src/mumble/GlobalShortcut_win.cpp
+--- a/src/mumble/GlobalShortcut_win.cpp
++++ b/src/mumble/GlobalShortcut_win.cpp
+@@ -6,14 +6,6 @@
+ // For detailed info about RAWKEYBOARD handling:
+ // https://blog.molecular-matters.com/2011/09/05/properly-handling-keyboard-input
+ 
+-#ifdef _MSVC_LANG
+-#	pragma warning(push)
+-// SPSCQueue does some funky alignment tricks which trigger the C4316
+-// warning about potential misalignment on the heap.
+-// We just have to trust the SPSCQueue implementation here.
+-#	pragma warning(disable : 4316)
+-#endif
+-
+ #include "GlobalShortcut_win.h"
+ 
+ #include "Global.h"
+@@ -24,9 +16,11 @@
+ 
+ #include "win.h"
+ 
++#include <chrono>
+ #include <iomanip>
+ #include <mutex>
+ #include <sstream>
++#include <utility>
+ 
+ #include <QUuid>
+ 
+@@ -310,11 +304,11 @@
+ 	return newShortcuts;
+ }
+ 
++#ifdef USE_XBOXINPUT
++GlobalShortcutWin::GlobalShortcutWin(std::unique_ptr< XboxInput > xboxInput)
++	: m_xinput(std::move(xboxInput))
++#else
+ GlobalShortcutWin::GlobalShortcutWin()
+-	: m_msgQueue(GlobalShortcutWin::QUEUE_CAPACITY)
+-#ifdef USE_XBOXINPUT
+-	  ,
+-	  m_xinputDevices(0), m_xinputLastPacket()
+ #endif
+ {
+ 	// Register the MetaTypes if they have not already been registered (e.g in Settings)
+@@ -324,7 +318,10 @@
+ }
+ 
+ GlobalShortcutWin::~GlobalShortcutWin() {
+-	requestInterruption();
++	{
++		std::lock_guard< std::mutex > lock(m_queueMutex);
++		requestInterruption();
++	}
+ 	m_condVar.notify_all();
+ 	wait();
+ }
+@@ -335,11 +332,15 @@
+ 		static_assert(std::numeric_limits< uint8_t >::max() >= XBOXINPUT_MAX_DEVICES,
+ 					  "Higher XBOXINPUT_MAX_DEVICES than anticipated.");
+ 
+-		m_xinput = std::make_unique< XboxInput >();
++		if (!m_xinput) {
++			m_xinput = std::make_unique< XboxInput >();
++		}
+ 		if (!m_xinput->isValid()) {
+ 			qWarning("GlobalShortcutWin: Failed to initialize XboxInput!");
+ 			m_xinput.reset();
+ 		}
++	} else {
++		m_xinput.reset();
+ 	}
+ #endif
+ #ifdef USE_GKEY
+@@ -358,6 +359,9 @@
+ #endif
+ 	// Wait for MainWindow's constructor to finish, so that we can get the window's handle.
+ 	while (!mumble_mw_hwnd) {
++		if (isInterruptionRequested()) {
++			return;
++		}
+ 		yieldCurrentThread();
+ 	}
+ 
+@@ -393,18 +397,44 @@
+ 		qWarning("GlobalShortcutWindows: RegisterRawInputDevices() failed with error %u!", GetLastError());
+ 	}
+ 
+-	std::mutex mutex;
+-	std::unique_lock< decltype(mutex) > lock(mutex);
+-
+-	do {
+-		m_condVar.wait(lock);
++	bool pollXInput = false;
++#ifdef USE_XBOXINPUT
++	pollXInput = static_cast< bool >(m_xinput);
++#endif
++	constexpr std::chrono::milliseconds pollInterval(20);
++	std::chrono::steady_clock::time_point nextPoll = std::chrono::steady_clock::now();
++
++	while (!isInterruptionRequested()) {
++		{
++			std::unique_lock< std::mutex > lock(m_queueMutex);
++			const auto ready = [this] { return isInterruptionRequested() || !m_msgQueue.empty(); };
++			if (pollXInput) {
++				// XInput must observe disconnects even when no more raw input arrives.
++				m_condVar.wait_until(lock, nextPoll, ready);
++			} else {
++				m_condVar.wait(lock, ready);
++			}
++		}
++
++		if (isInterruptionRequested()) {
++			break;
++		}
+ 
+ 		if (bNeedRemap) {
+ 			remap();
+ 		}
+ 
+-		while (const std::unique_ptr< MsgRaw > *item = m_msgQueue.front()) {
+-			const std::unique_ptr< MsgRaw > &msg = *item;
++		// A busy HID device must not starve polling of the other input sources.
++		for (size_t processed = 0; processed < QUEUE_CAPACITY; ++processed) {
++			std::unique_ptr< MsgRaw > msg;
++			{
++				std::lock_guard< std::mutex > lock(m_queueMutex);
++				if (m_msgQueue.empty()) {
++					break;
++				}
++				msg = std::move(m_msgQueue.front());
++				m_msgQueue.pop_front();
++			}
+ 
+ 			switch (msg->type()) {
+ 				case MsgRaw::Hid:
+@@ -417,11 +447,19 @@
+ 				case MsgRaw::Mouse:
+ 					processMsgMouse(static_cast< MsgMouse & >(*msg));
+ 					break;
+-			}
+-
+-			m_msgQueue.pop();
+-		}
+-	} while (!isInterruptionRequested());
++				case MsgRaw::DeviceRemoved:
++					processDeviceRemoved(static_cast< MsgDeviceRemoved & >(*msg).deviceHandle);
++					break;
++			}
++		}
++
++		if (pollXInput && std::chrono::steady_clock::now() >= nextPoll) {
++#ifdef USE_XBOXINPUT
++			processXboxInput();
++#endif
++			nextPoll = std::chrono::steady_clock::now() + pollInterval;
++		}
++	}
+ }
+ 
+ bool GlobalShortcutWin::isRateLimited(HANDLE device) {
+@@ -435,7 +473,12 @@
+ 
+ 		m_throttleCounter[device] = 0;
+ 
+-		if (m_msgQueue.size() < GlobalShortcutWin::QUEUE_CAPACITY / 2) {
++		bool belowThreshold = false;
++		{
++			std::lock_guard< std::mutex > lock(m_queueMutex);
++			belowThreshold = m_msgQueue.size() < GlobalShortcutWin::QUEUE_CAPACITY / 2;
++		}
++		if (belowThreshold) {
+ 			// Queue is half empty, relax threshold
+ 			m_throttleThreshold[device]--;
+ 			if (m_throttleThreshold[device] == 0) {
+@@ -448,7 +491,14 @@
+ }
+ 
+ void GlobalShortcutWin::tryPlaceEvent(HANDLE device, bool rawhid, std::unique_ptr< MsgRaw > &&event) {
+-	const bool enqueued = m_msgQueue.try_emplace(std::move(event));
++	bool enqueued = false;
++	{
++		std::lock_guard< std::mutex > lock(m_queueMutex);
++		if (m_msgQueue.size() < QUEUE_CAPACITY) {
++			m_msgQueue.push_back(std::move(event));
++			enqueued = true;
++		}
++	}
+ 	if (!enqueued) {
+ 		qWarning() << "GlobalShortcutWin: Failed to enqueue input event - queue full?";
+ 
+@@ -719,26 +769,29 @@
+ 	device.usageRange.second = buttonCaps[0].Range.UsageMax;
+ 	device.buttons.resize(device.usageRange.second - device.usageRange.first + 1);
+ 
+-	if (device.xinput) {
+-		++m_xinputDevices;
+-	}
+-
+ 	qInfo("GlobalShortcutWin: \"%s\" added", device.name.c_str());
+ 
+ 	return m_devices.insert({ deviceHandle, device }).first;
+ }
+ 
+ void GlobalShortcutWin::deviceRemoved(const HANDLE deviceHandle) {
++	{
++		std::lock_guard< std::mutex > lock(m_queueMutex);
++		// Removal notifications must not be dropped just because the input queue is full.
++		m_msgQueue.push_back(std::make_unique< MsgDeviceRemoved >(deviceHandle));
++	}
++	m_throttleCounter.erase(deviceHandle);
++	m_throttleThreshold.erase(deviceHandle);
++	m_condVar.notify_all();
++}
++
++void GlobalShortcutWin::processDeviceRemoved(HANDLE deviceHandle) {
+ 	const auto iter = m_devices.find(deviceHandle);
+ 	if (iter == m_devices.cend()) {
+ 		return;
+ 	}
+ 
+ 	const auto &device = (*iter).second;
+-	if (device.xinput) {
+-		--m_xinputDevices;
+-	}
+-
+ 	qInfo("GlobalShortcutWin: \"%s\" removed", device.name.c_str());
+ 
+ 	m_devices.erase(iter);
+@@ -770,19 +823,11 @@
+ 			return state.buttons & (1 << bit);
+ 	}
+ }
+-#endif
+-void GlobalShortcutWin::processOther() {
+-#ifdef USE_XBOXINPUT
+-	if (m_xinput && m_xinputDevices > 0) {
++void GlobalShortcutWin::processXboxInput() {
++	if (m_xinput) {
+ 		for (uint8_t i = 0; i < XBOXINPUT_MAX_DEVICES; ++i) {
+ 			XboxInputState state;
+-			if (m_xinput->GetState(i, &state) != ERROR_SUCCESS) {
+-				continue;
+-			}
+-
+-			// Skip the result of GetState() if the packet number hasn't changed,
+-			// or if we're at the first packet.
+-			if (m_xinputLastPacket[i] != 0 && state.packetNumber == m_xinputLastPacket[i]) {
++			if (!m_xinput->poll(i, state)) {
+ 				continue;
+ 			}
+ 
+@@ -793,11 +838,11 @@
+ 				input.code = j;
+ 				handleButton(QVariant::fromValue(input), xinputIsPressed(j, state));
+ 			}
+-
+-			m_xinputLastPacket[i] = state.packetNumber;
+-		}
+-	}
+-#endif
++		}
++	}
++}
++#endif
++void GlobalShortcutWin::processOther() {
+ #ifdef USE_GKEY
+ 	if (m_gkey) {
+ 		InputGkey input = {};
+@@ -936,10 +981,6 @@
+ 	return info;
+ }
+ 
+-#ifdef _MSVC_LANG
+-#	pragma warning(pop)
+-#endif
+-
+ std::string GlobalShortcutWin::utf16To8(const std::wstring &wstr) {
+ 	if (wstr.empty()) {
+ 		return {};
+diff --git a/src/mumble/GlobalShortcut_win.h b/src/mumble/GlobalShortcut_win.h
+--- a/src/mumble/GlobalShortcut_win.h
++++ b/src/mumble/GlobalShortcut_win.h
+@@ -6,6 +6,7 @@
+ #ifndef MUMBLE_MUMBLE_GLOBALSHORTCUT_WIN_H_
+ #define MUMBLE_MUMBLE_GLOBALSHORTCUT_WIN_H_
+ 
++#include "win.h"
+ #include "GlobalShortcut.h"
+ 
+ #ifdef USE_XBOXINPUT
+@@ -13,12 +14,12 @@
+ #endif
+ 
+ #include <condition_variable>
++#include <deque>
+ #include <memory>
++#include <mutex>
+ #include <span>
+ #include <string>
+ #include <unordered_map>
+-
+-#include <rigtorp/SPSCQueue.h>
+ 
+ #ifdef USE_GKEY
+ class GKeyLibrary;
+@@ -47,7 +48,11 @@
+ 	ButtonInfo buttonInfo(const QVariant &button) override;
+ 	void run() override;
+ 
++#ifdef USE_XBOXINPUT
++	explicit GlobalShortcutWin(std::unique_ptr< XboxInput > xboxInput = nullptr);
++#else
+ 	GlobalShortcutWin();
++#endif
+ 	~GlobalShortcutWin() override;
+ public slots:
+ 	void deviceRemoved(const HANDLE deviceHandle);
+@@ -55,7 +60,7 @@
+ protected:
+ 	class MsgRaw {
+ 	public:
+-		enum Type : uint8_t { Hid, Keyboard, Mouse };
++		enum Type : uint8_t { Hid, Keyboard, Mouse, DeviceRemoved };
+ 
+ 		constexpr Type type() { return m_type; };
+ 
+@@ -99,6 +104,13 @@
+ 		USHORT buttonFlags;
+ 	};
+ 
++	class MsgDeviceRemoved : public MsgRaw {
++	public:
++		explicit MsgDeviceRemoved(HANDLE deviceHandle) : MsgRaw(DeviceRemoved), deviceHandle(deviceHandle) {}
++
++		HANDLE deviceHandle;
++	};
++
+ 	struct Device {
+ 		std::string name;
+ 		std::string prefix;
+@@ -114,24 +126,20 @@
+ 	void processMsgHid(MsgHid &msg);
+ 	void processMsgKeyboard(MsgKeyboard &msg);
+ 	void processMsgMouse(const MsgMouse &msg);
++	void processDeviceRemoved(HANDLE deviceHandle);
+ 	void processOther();
+ 
++	std::mutex m_queueMutex;
+ 	std::condition_variable m_condVar;
+ 
+-	rigtorp::SPSCQueue< std::unique_ptr< MsgRaw > > m_msgQueue;
++	std::deque< std::unique_ptr< MsgRaw > > m_msgQueue;
+ 
+ 	typedef std::unordered_map< HANDLE, Device > DeviceMap;
+ 	DeviceMap m_devices;
+ #ifdef USE_XBOXINPUT
+ 	std::unique_ptr< XboxInput > m_xinput;
+-	/// Holds the number of XInput devices available on the system.
+-	/// It is filled out by addDevice().
+-	uint8_t m_xinputDevices;
+-	/// Holds the last packet number that was processed.
+-	/// Any new data queried for a device is only valid
+-	/// if the packet number is different than last time we queried it.
+-	uint32_t m_xinputLastPacket[XBOXINPUT_MAX_DEVICES];
+ 
++	void processXboxInput();
+ 	static bool xinputIsPressed(const uint8_t bit, const XboxInputState &state);
+ #endif
+ #ifdef USE_GKEY
+diff --git a/src/mumble/XboxInput.cpp b/src/mumble/XboxInput.cpp
+--- a/src/mumble/XboxInput.cpp
++++ b/src/mumble/XboxInput.cpp
+@@ -67,3 +67,24 @@
+ bool XboxInput::isValid() const {
+ 	return m_valid;
+ }
++
++bool XboxInput::poll(uint32_t deviceIndex, XboxInputState &state) {
++	if (!GetState || deviceIndex >= m_lastPackets.size()) {
++		return false;
++	}
++
++	std::optional< uint32_t > &lastPacket = m_lastPackets[deviceIndex];
++	if (GetState(deviceIndex, &state) != ERROR_SUCCESS) {
++		const bool wasConnected = lastPacket.has_value();
++		lastPacket.reset();
++		state = {};
++		return wasConnected;
++	}
++
++	if (lastPacket && *lastPacket == state.packetNumber) {
++		return false;
++	}
++
++	lastPacket = state.packetNumber;
++	return true;
++}
+diff --git a/src/mumble/XboxInput.h b/src/mumble/XboxInput.h
+--- a/src/mumble/XboxInput.h
++++ b/src/mumble/XboxInput.h
+@@ -10,6 +10,8 @@
+ 
+ #include <QUuid>
+ 
++#include <array>
++#include <optional>
+ #include <stdint.h>
+ 
+ /// XBOXINPUT_MAX_DEVICES defines the maximum
+@@ -59,6 +61,10 @@
+ 	/// is usable.
+ 	bool isValid() const;
+ 
++	/// Poll a slot, returning true when its state changes. A disconnect produces
++	/// one neutral state so that callers can release any held buttons.
++	bool poll(uint32_t deviceIndex, XboxInputState &state);
++
+ 	/// Query the state of the Xbox controller at deviceIndex.
+ 	/// If the function succeeds, it returns 0 (Windows's ERROR_SUCCESS).
+ 	/// If no device is connected, it returns 0x48F (Windows's ERROR_DEVICE_NOT_CONNECTED).
+@@ -79,6 +85,9 @@
+ 	/// m_valid determines whether or not the XboxInputLibrary
+ 	/// is valid for use.
+ 	bool m_valid;
++
++private:
++	std::array< std::optional< uint32_t >, XBOXINPUT_MAX_DEVICES > m_lastPackets;
+ };
+ 
+ #endif
+diff --git a/src/tests/CMakeLists.txt b/src/tests/CMakeLists.txt
+--- a/src/tests/CMakeLists.txt
++++ b/src/tests/CMakeLists.txt
+@@ -28,6 +28,9 @@
+ endif()
+ 
+ if(client)
++	if(WIN32 AND xboxinput)
++		add_subdirectory("TestXboxInput")
++	endif()
+ 	add_subdirectory("TestXMLTools")
+ 	if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "FreeBSD")
+ 		# For some reason Qt segfaults when executing this test on FreeBSD without a display (even when using the offscreen plugin)
+diff --git a/src/tests/TestXboxInput/CMakeLists.txt b/src/tests/TestXboxInput/CMakeLists.txt
+new file mode 100644
+--- /dev/null
++++ b/src/tests/TestXboxInput/CMakeLists.txt
+@@ -0,0 +1,14 @@
++# Copyright The Mumble Developers. All rights reserved.
++# Use of this source code is governed by a BSD-style license
++# that can be found in the LICENSE file at the root of the
++# Mumble source tree or at <https://www.mumble.info/LICENSE>.
++
++add_executable(TestXboxInput TestXboxInput.cpp)
++set_target_properties(TestXboxInput PROPERTIES AUTOMOC ON)
++target_link_libraries(TestXboxInput PRIVATE mumble_client_object_lib Qt6::Test)
++
++add_test(
++	NAME TestXboxInput
++	COMMAND $<TARGET_FILE:TestXboxInput>
++	WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
++)
+diff --git a/src/tests/TestXboxInput/TestXboxInput.cpp b/src/tests/TestXboxInput/TestXboxInput.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/tests/TestXboxInput/TestXboxInput.cpp
+@@ -0,0 +1,206 @@
++// Copyright The Mumble Developers. All rights reserved.
++// Use of this source code is governed by a BSD-style license
++// that can be found in the LICENSE file at the root of the
++// Mumble source tree or at <https://www.mumble.info/LICENSE>.
++
++#include "ChannelListenerManager.h"
++#include "XboxInput.h"
++#include "Global.h"
++#include "GlobalShortcut_win.h"
++
++#include <QSignalSpy>
++#include <QTemporaryDir>
++#include <QtTest>
++
++#include <array>
++#include <limits>
++#include <memory>
++#include <mutex>
++#include <utility>
++
++extern HWND mumble_mw_hwnd;
++
++namespace {
++struct Device {
++	uint32_t result      = ERROR_DEVICE_NOT_CONNECTED;
++	XboxInputState state = {};
++	uint32_t queries     = 0;
++};
++
++std::array< Device, XBOXINPUT_MAX_DEVICES > s_devices;
++std::mutex s_deviceMutex;
++
++uint32_t WINAPI getState(uint32_t index, XboxInputState *state) {
++	std::lock_guard< std::mutex > lock(s_deviceMutex);
++	Device &device = s_devices.at(index);
++	++device.queries;
++	if (device.result == ERROR_SUCCESS) {
++		*state = device.state;
++	}
++	return device.result;
++}
++
++Device device(uint32_t index) {
++	std::lock_guard< std::mutex > lock(s_deviceMutex);
++	return s_devices.at(index);
++}
++
++void setDevice(uint32_t index, uint32_t result, uint32_t packet, uint16_t buttons) {
++	std::lock_guard< std::mutex > lock(s_deviceMutex);
++	Device &entry            = s_devices.at(index);
++	entry.result             = result;
++	entry.state.packetNumber = packet;
++	entry.state.buttons      = buttons;
++	entry.state.leftTrigger  = buttons ? 255 : 0;
++}
++
++std::unique_ptr< XboxInput > createInput() {
++	auto input      = std::make_unique< XboxInput >();
++	input->GetState = getState;
++	return input;
++}
++} // namespace
++
++class TestXboxInput : public QObject {
++	Q_OBJECT
++
++private slots:
++	void initTestCase();
++	void cleanupTestCase();
++	void init();
++	void reconnect_data();
++	void reconnect();
++	void independentSlots();
++	void invalidSlot();
++	void workerPollsWithoutRawInput();
++	void disabledWorkerStops();
++
++private:
++	QTemporaryDir m_directory;
++	std::unique_ptr< Global > m_global;
++};
++
++void TestXboxInput::initTestCase() {
++	QVERIFY(m_directory.isValid());
++	m_global                = std::make_unique< Global >(m_directory.filePath("settings.json"));
++	Global::g_global_struct = m_global.get();
++	mumble_mw_hwnd          = CreateWindowExW(0, L"STATIC", L"TestXboxInput", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr,
++                                     GetModuleHandleW(nullptr), nullptr);
++	QVERIFY(mumble_mw_hwnd != nullptr);
++}
++
++void TestXboxInput::cleanupTestCase() {
++	if (mumble_mw_hwnd) {
++		DestroyWindow(mumble_mw_hwnd);
++		mumble_mw_hwnd = nullptr;
++	}
++	Global::g_global_struct = nullptr;
++	m_global.reset();
++}
++
++void TestXboxInput::init() {
++	std::lock_guard< std::mutex > lock(s_deviceMutex);
++	s_devices                        = {};
++	Global::get().s.bEnableXboxInput = true;
++	Global::get().s.bEnableGKey      = false;
++}
++
++void TestXboxInput::reconnect_data() {
++	QTest::addColumn< quint32 >("packet");
++	QTest::addColumn< quint32 >("error");
++	QTest::newRow("zero") << quint32(0) << quint32(ERROR_DEVICE_NOT_CONNECTED);
++	QTest::newRow("nonzero") << quint32(42) << quint32(ERROR_DEVICE_NOT_CONNECTED);
++	QTest::newRow("maximum") << std::numeric_limits< quint32 >::max() << quint32(ERROR_DEVICE_NOT_CONNECTED);
++	QTest::newRow("query-error") << quint32(42) << quint32(ERROR_GEN_FAILURE);
++}
++
++void TestXboxInput::reconnect() {
++	QFETCH(quint32, packet);
++	QFETCH(quint32, error);
++	auto input           = createInput();
++	XboxInputState state = {};
++	QVERIFY(!input->poll(0, state));
++
++	setDevice(0, ERROR_SUCCESS, packet, 0x1000);
++	QVERIFY(input->poll(0, state));
++	QCOMPARE(state.buttons, uint16_t(0x1000));
++	QCOMPARE(state.leftTrigger, uint8_t(255));
++	QVERIFY(!input->poll(0, state));
++	QCOMPARE(device(0).queries, uint32_t(3));
++
++	setDevice(0, error, packet, 0x1000);
++	QVERIFY(input->poll(0, state));
++	QCOMPARE(state.buttons, uint16_t(0));
++	QCOMPARE(state.leftTrigger, uint8_t(0));
++	QVERIFY(!input->poll(0, state));
++
++	setDevice(0, ERROR_SUCCESS, packet, 0x2000);
++	QVERIFY(input->poll(0, state));
++	QCOMPARE(state.buttons, uint16_t(0x2000));
++	QVERIFY(!input->poll(0, state));
++}
++
++void TestXboxInput::independentSlots() {
++	auto input           = createInput();
++	XboxInputState state = {};
++	setDevice(0, ERROR_SUCCESS, 7, 0x1000);
++	setDevice(1, ERROR_SUCCESS, 7, 0x2000);
++	QVERIFY(input->poll(0, state));
++	QVERIFY(input->poll(1, state));
++	setDevice(0, ERROR_DEVICE_NOT_CONNECTED, 7, 0x1000);
++	QVERIFY(input->poll(0, state));
++	QVERIFY(!input->poll(1, state));
++	setDevice(1, ERROR_SUCCESS, 8, 0x4000);
++	QVERIFY(input->poll(1, state));
++	QCOMPARE(state.buttons, uint16_t(0x4000));
++}
++
++void TestXboxInput::invalidSlot() {
++	auto input           = createInput();
++	XboxInputState state = {};
++	QVERIFY(!input->poll(XBOXINPUT_MAX_DEVICES, state));
++	QCOMPARE(device(0).queries, uint32_t(0));
++	input->GetState = nullptr;
++	QVERIFY(!input->poll(0, state));
++}
++
++void TestXboxInput::workerPollsWithoutRawInput() {
++	auto input = createInput();
++	QVERIFY(input->isValid());
++	GlobalShortcutWin worker(std::move(input));
++	QSignalSpy buttons(&worker, &GlobalShortcutEngine::buttonPressed);
++
++	// No raw input devices or messages are supplied to the worker.
++	QTRY_VERIFY_WITH_TIMEOUT(device(0).queries >= 3, 1000);
++	QTest::qWait(120);
++	setDevice(0, ERROR_SUCCESS, 42, 0x1000);
++	QTRY_COMPARE_WITH_TIMEOUT(buttons.count(), 2, 1000);
++	QVERIFY(!buttons.at(0).at(0).toBool());
++	QVERIFY(!buttons.at(1).at(0).toBool());
++
++	setDevice(0, ERROR_DEVICE_NOT_CONNECTED, 42, 0x1000);
++	worker.deviceRemoved(reinterpret_cast< HANDLE >(1));
++	QTRY_COMPARE_WITH_TIMEOUT(buttons.count(), 4, 1000);
++	QVERIFY(buttons.at(2).at(0).toBool());
++	QVERIFY(buttons.at(3).at(0).toBool());
++	const uint32_t queries = device(0).queries;
++	QTRY_VERIFY_WITH_TIMEOUT(device(0).queries > queries, 1000);
++
++	setDevice(0, ERROR_SUCCESS, 42, 0x1000);
++	QTRY_COMPARE_WITH_TIMEOUT(buttons.count(), 6, 1000);
++	QVERIFY(!buttons.at(4).at(0).toBool());
++	QVERIFY(!buttons.at(5).at(0).toBool());
++}
++
++void TestXboxInput::disabledWorkerStops() {
++	Global::get().s.bEnableXboxInput = false;
++	GlobalShortcutWin worker(createInput());
++	QTest::qWait(50);
++	QCOMPARE(device(0).queries, uint32_t(0));
++	worker.requestInterruption();
++	worker.deviceRemoved(reinterpret_cast< HANDLE >(1));
++	QVERIFY(worker.wait(1000));
++}
++
++QTEST_MAIN(TestXboxInput)
++#include "TestXboxInput.moc"
+diff --git a/src/tests/TestXboxInput/README.md b/src/tests/TestXboxInput/README.md
+new file mode 100644
+--- /dev/null
++++ b/src/tests/TestXboxInput/README.md
+@@ -0,0 +1,36 @@
++# Windows Xbox input regression tests
++
++`TestXboxInput` uses an injected state-query function, so it does not require a
++controller. It checks packet-number caching, disconnect releases, independent
++slots, and reconnects that reuse a packet number. The worker test supplies no raw
++input messages: polling must still discover a controller, observe its disconnect,
++and accept input after reconnection.
++
++Build with `client=ON`, `tests=ON`, and `xboxinput=ON` on Windows, then run from the
++build directory:
++
++```sh
++ctest -R '^TestXboxInput$' --output-on-failure
++```
++
++## Physical reconnect check
++
++The fake backend cannot reproduce Windows driver teardown. Also validate the
++client with an Xbox controller and the Xbox Wireless Adapter:
++
++1. Close other Mumble instances, including any voice application that embeds
++   Mumble. Leave the normal Windows controller drivers enabled.
++2. Start the client under test with XInput shortcut support enabled. An isolated
++   profile is sufficient; connecting to a voice server is not necessary.
++3. Connect the controller and press A in Steam Big Picture or a game. Confirm
++   that the input is accepted and the controller remains connected.
++4. Exercise the controls for about ten seconds, turn the controller off normally,
++   and wait five seconds.
++5. Repeat the connect/input/disconnect sequence at least five times without
++   restarting Mumble or the PC.
++
++A powered-on controller with no usable game input is not a pass. Neither
++disabling XInput shortcut support nor bypassing a Windows input driver validates
++the reconnect behavior.
++
++Historical context: [Mumble issue #2649](https://github.com/mumble-voip/mumble/issues/2649).

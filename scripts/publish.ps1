@@ -14,6 +14,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path $PSScriptRoot -Parent
+. (Join-Path $root 'native/voice-build.ps1')
 if (!$Runtime) { $Runtime = Get-StrifeRuntime }
 if ($Runtime -ne (Get-StrifeRuntime)) { throw 'Publish on the target OS and architecture: the voice engine and packaging tools are native.' }
 $Version = Get-StrifeVersion $Version
@@ -33,7 +34,7 @@ foreach ($file in $required) {
     if (!(Test-Path (Join-Path $voice $file))) { throw "Missing native payload $file. Run ./scripts/build-voice.ps1 first." }
 }
 $buildInfo = Get-Content (Join-Path $voice 'build-info.json') -Raw | ConvertFrom-Json
-if ($buildInfo.runtime -ne $Runtime) { throw "Voice runtime $($buildInfo.runtime) does not match $Runtime." }
+Assert-StrifeVoiceBuildInfo $root $buildInfo $Runtime
 $output = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $root 'artifacts/Strife' }
 if ($OutputDirectory) {
     if ((Test-Path $output) -and (Get-ChildItem -LiteralPath $output -Force | Select-Object -First 1)) {
@@ -53,7 +54,7 @@ if ($IncludeDevelopmentStreaming) {
 }
 Copy-Item (Join-Path $root 'README.md'), (Join-Path $root 'THIRD-PARTY-NOTICES.md') $output -Force
 Copy-Item (Join-Path $root 'docs') $output -Recurse -Force
-@{ version = $Version; runtime = $Runtime; voiceRevision = $buildInfo.revision;
+@{ version = $Version; runtime = $Runtime; voiceRevision = $buildInfo.revision; voiceInputsSha256 = $buildInfo.nativeInputsSha256;
     developmentStreaming = [bool]$IncludeDevelopmentStreaming } | ConvertTo-Json | Set-Content (Join-Path $output 'release.json')
 if (!$NoPackage) {
     if ($IsWindows) {

@@ -20,6 +20,16 @@ function Get-StrifeRuntime {
     throw 'Strife supports Windows, macOS and Linux.'
 }
 
+function Assert-StrifeVoiceBuildInfo([string]$Root, [object]$BuildInfo, [string]$Runtime) {
+    $pins = Get-Content -LiteralPath (Join-Path $Root 'packaging/native-dependencies.json') -Raw | ConvertFrom-Json
+    if ($BuildInfo.runtime -ne $Runtime -or $BuildInfo.revision -ne $pins.mumbleRevision) {
+        throw 'Voice runtime or pinned Mumble revision mismatch; rebuild the native engine.'
+    }
+    if ($BuildInfo.nativeInputsSha256 -ne (Get-StrifeVoiceBuildHash $Root)) {
+        throw 'Voice native inputs are stale or unverified; rebuild the native engine.'
+    }
+}
+
 function Reset-StrifeStagingDirectory([string]$Path) {
     $artifacts = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../artifacts')) + [IO.Path]::DirectorySeparatorChar
     $target = [IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)

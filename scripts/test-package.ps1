@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path $PSScriptRoot -Parent
+. (Join-Path $root 'native/voice-build.ps1')
 if (!$PublishDirectory) { $PublishDirectory = Join-Path $root 'artifacts/Strife' }
 $version = (Get-Content (Join-Path $PublishDirectory 'release.json') -Raw | ConvertFrom-Json).version
 $stage = Join-Path $root 'artifacts/package-test'
@@ -14,6 +15,7 @@ try {
     if ($IsWindows) {
         Expand-Archive (Join-Path $root "artifacts/release/Strife-$version-$Runtime.zip") $stage
         $env:STRIFE_VOICE_ENGINE = Join-Path $stage 'voice/strife-voice.exe'
+        $voiceInfoPath = Join-Path $stage 'voice/build-info.json'
         $releaseInfo = Get-Content (Join-Path $stage 'release.json') -Raw | ConvertFrom-Json
         if ($releaseInfo.developmentStreaming) {
             . (Join-Path $PSScriptRoot 'streaming-package.ps1')
@@ -26,6 +28,7 @@ try {
         & codesign --verify --deep --strict $app
         if ($LASTEXITCODE) { throw 'Extracted app signature is invalid.' }
         $env:STRIFE_VOICE_ENGINE = Join-Path $app 'Contents/MacOS/voice/StrifeVoice.app/Contents/MacOS/Mumble'
+        $voiceInfoPath = Join-Path $app 'Contents/Resources/voice/build-info.json'
         foreach ($binary in @($env:STRIFE_VOICE_ENGINE, (Join-Path $app 'Contents/MacOS/PhotinoX.Native.dylib'))) {
             # Universal dylibs have a filename header for each architecture.
             # Only indented lines describe dependencies; headers contain the
@@ -38,6 +41,7 @@ try {
         & tar -xzf (Join-Path $root "artifacts/release/Strife-$version-$Runtime.tar.gz") -C $stage
         if ($LASTEXITCODE) { throw 'Linux archive extraction failed.' }
         $env:STRIFE_VOICE_ENGINE = Join-Path $stage 'Strife/voice/strife-voice'
+        $voiceInfoPath = Join-Path $stage 'Strife/voice/build-info.json'
         foreach ($binary in @($env:STRIFE_VOICE_ENGINE, (Join-Path $stage 'Strife/PhotinoX.Native.so'))) {
             $dependencies = @(& ldd $binary)
             if ($LASTEXITCODE) { throw "Cannot inspect Linux dependencies for $binary." }
@@ -45,6 +49,7 @@ try {
             if ($missing) { throw "Missing Linux dependencies for ${binary}: $($missing -join ', ')" }
         }
     }
+    Assert-StrifeVoiceBuildInfo $root (Get-Content -LiteralPath $voiceInfoPath -Raw | ConvertFrom-Json) $Runtime
     $arguments = @('run', '--project', (Join-Path $root 'tests/Strife.Tests'), '-c', 'Release', '--', '--voice-startup-only')
     if ($IsLinux) { & xvfb-run -a dotnet @arguments } else { & dotnet @arguments }
     if ($LASTEXITCODE) { throw 'Packaged voice startup failed.' }
