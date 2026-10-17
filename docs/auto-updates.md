@@ -38,44 +38,44 @@ missing/outdated VC++ without UAC. This means an unattended update requiring a
 newer VC++ runtime must defer to an explicit interactive repair, not loop.
 The portable ZIP remains unchanged and does not opt into automatic updates.
 
-### Upcoming online Setup (not yet published)
+### Online Setup starting with preview.10
 
-Previously published installers bundle the Microsoft prerequisites. The upcoming
-installed Windows app and OTA package will become framework-dependent. Setup
-will bundle the app and native voice engine, but download Microsoft's .NET
+Installers through preview.9 bundled the Microsoft prerequisites and .NET. The
+installed Windows app and OTA package are now framework-dependent. Setup
+bundles the app and native voice engine, but downloads Microsoft's .NET
 Runtime and ASP.NET Core Runtime for Windows x64 when absent or incompatible.
 The app uses `Microsoft.NET.Sdk.Web`, requiring both `Microsoft.NETCore.App` and
-`Microsoft.AspNetCore.App`. Requirements will come from the generated
+`Microsoft.AspNetCore.App`. Requirements come from the generated
 runtimeconfig: each framework must match the required major/minor version and
 have a patch version greater than or equal to the required patch.
-Setup will also fetch Microsoft's WebView2 x64 standalone installer and Visual
+Setup also fetches Microsoft's WebView2 x64 standalone installer and Visual
 C++ x64 Redistributable only when missing or outdated.
-Internet access will be required for those downloads; no separate offline
-installer will be retained.
+Internet access is required for those downloads; there is no separate offline
+installer.
 
-Packaging will download the prerequisite installers from Microsoft and validate their
-Microsoft Authenticode signatures, then pin their resolved, versioned HTTPS
-URLs and SHA-256 hashes into Setup. Setup will verify each downloaded file's
-hash before execution. `-PrerequisiteDirectory` will be download staging
+Packaging downloads the prerequisite installers from Microsoft and validates their
+Microsoft Authenticode signatures, then pins their resolved, versioned HTTPS
+URLs and SHA-256 hashes into Setup. Setup verifies each downloaded file's
+hash before execution. `-PrerequisiteDirectory` is download staging
 refreshed on every packaging run, not an offline cache.
 
 .NET runtimes install machine-wide and may request UAC approval, as can VC++.
 Run Setup normally as the intended user; the app remains per-user. Silent Setup
-will refuse missing/incompatible .NET runtimes without requesting elevation,
+refuses missing/incompatible .NET runtimes without requesting elevation,
 just as it refuses missing/outdated VC++. Unattended updates must defer to an
 explicit interactive repair when prerequisites are incompatible.
 
-The Windows portable ZIP will remain fully self-contained with .NET and voice
+The Windows portable ZIP remains fully self-contained with .NET and voice
 exactly as before, with its existing external WebView2/VC++ requirements unchanged.
-Linux and macOS will remain self-contained. These packages remain manual-update only.
+Linux and macOS remain self-contained. These packages remain manual-update only.
 
-Upcoming signed **schema 2** feeds will carry `dotNetFrameworks` derived from the
+Signed **schema 2** feeds carry `dotNetFrameworks` derived from the
 generated runtimeconfig so compatible clients can check both required frameworks.
 Old schema 1 clients reject schema 2; **one manual upgrade using the new Setup
 is required** to transition safely, even for existing updater-capable installs.
 Do not auto-ship a thin, framework-dependent payload to old clients in a schema 1
-feed. This transition is not yet released; the schema 1 description below
-documents the existing contract.
+feed. Schema 2 extends the authenticated metadata contract below with explicit
+.NET framework requirements.
 
 For manual installation or repair, use Microsoft's official
 [WebView2 x64 standalone installer](https://go.microsoft.com/fwlink/?linkid=2124701)
@@ -98,8 +98,9 @@ comparison rejects downgrades. Manual Setup retains its numeric downgrade check.
 Metadata is a JSON envelope containing base64 payload bytes and an RSA-PSS/SHA-256
 signature (32-byte salt). The client embeds `update-key.pem`; the private key is
 the GitHub Actions secret `STRIFE_UPDATE_SIGNING_KEY`, never a repository file.
-Schema 1 binds channel, version, immutable filename, length, SHA-256, exact source
-commit, issue/expiry times and minimum Windows/VC++ versions. Unknown schemas
+Schema 2 binds channel, version, immutable filename, length, SHA-256, exact source
+commit, issue/expiry times, minimum Windows/VC++ versions and `dotNetFrameworks`.
+Schema 1 lacks the .NET requirements and was used by older releases. Unknown schemas
 fail closed. Metadata is limited to 32 KiB and packages to 1 GiB. Issued times
 cannot go backward relative to previously verified metadata, even after expiry.
 Feeds expire after 30 days (client maximum: 45 days).
