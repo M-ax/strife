@@ -1,23 +1,23 @@
 {
-  "sourceRef": "8fc31932b1042f579125a4dd6365b4a30343aa8c",
-  "runId": "37405009037",
-  "version": "0.1.0-preview.5",
+  "sourceRef": "0a4845f37c18f6e016b782aea5d9c17f3c56b654",
+  "runId": "39008107209",
+  "version": "0.1.0-preview.8",
   "archives": {
     "win-x64": {
-      "filename": "Strife-0.1.0-preview.5-win-x64.zip",
-      "sha256": "0bb5f631dfb322a8815a73ff308ad54c9f21b58af046eb31ab9a576dae8bf1df"
+      "filename": "Strife-0.1.0-preview.8-win-x64.zip",
+      "sha256": "4e35c33fa2d12fd99f5d95f5bed4be9068666c111933b9bc6dc542107d884ed6"
     },
     "linux-x64": {
-      "filename": "Strife-0.1.0-preview.5-linux-x64.tar.gz",
-      "sha256": "6628ea2054110c35afdf0b59de0d011c23106c3fe8c41262c4e5b185fc24d2e9"
+      "filename": "Strife-0.1.0-preview.8-linux-x64.tar.gz",
+      "sha256": "f41c31c5bc772bfaf303352d5baa8f98a734edfad0b8754f348940255e047171"
     },
     "osx-arm64": {
-      "filename": "Strife-0.1.0-preview.5-osx-arm64.zip",
-      "sha256": "0d19ad94c83e025040d3e39c2b565a6999889b51c2932a5ff34442f77e029171"
+      "filename": "Strife-0.1.0-preview.8-osx-arm64.zip",
+      "sha256": "015419c281773d9eec8940dcc02131ad859caa1a14fb6c277e70cafa6183b888"
     },
     "osx-x64": {
-      "filename": "Strife-0.1.0-preview.5-osx-x64.zip",
-      "sha256": "cda8ffe7db454b56c4b8022024f1e197d5326b6fc0ec20f7c032b7bcf6ffa9b2"
+      "filename": "Strife-0.1.0-preview.8-osx-x64.zip",
+      "sha256": "4c58a6431fc3e2c5edaa412ff374bcc18bf313d76555305ffc352cf2a65690a9"
     }
   }
 }
