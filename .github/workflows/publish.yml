@@ -154,6 +154,8 @@ jobs:
         run: |
           pwsh -NoProfile -File ./tests/native-build.tests.ps1
           if ($LASTEXITCODE) { throw 'Native build recipe tests failed.' }
+          pwsh -NoProfile -File ./tests/windows-dotnet.tests.ps1
+          if ($LASTEXITCODE) { throw 'Windows runtime packaging tests failed.' }
           dotnet run --project tests/Strife.Tests -c Release
           if ($LASTEXITCODE) { throw 'Managed tests failed.' }
           npm ci
@@ -168,7 +170,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           # Per-user silent Setup deliberately never elevates to install VC++.
-          # Provision the signed, bundled prerequisite on this disposable runner.
+          # Provision the signed prerequisite downloaded during packaging on this disposable runner.
           $installer = Join-Path $PWD 'artifacts/prerequisites/VC_redist.x64.exe'
           $required = [version]([regex]::Match((Get-Item $installer).VersionInfo.FileVersion, '\d+\.\d+\.\d+\.\d+').Value)
           $key = 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64'
@@ -179,6 +181,32 @@ jobs:
           }
           $runtime = Get-ItemProperty $key
           if ($runtime.Installed -ne 1 -or [version]$runtime.Version.TrimStart('v') -lt $required) { throw 'VC++ runtime verification failed.' }
+          # Shared runtimes are machine prerequisites too; standard-user silent
+          # Setup must not elevate. Provision only on this disposable runner.
+          $requirements = Get-Content artifacts/release/update-requirements.json -Raw | ConvertFrom-Json
+          foreach ($framework in $requirements.dotNetFrameworks) {
+            $required = [version]$framework.version
+            $compatible = {
+              $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
+              $key = $base.OpenSubKey("SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\$($framework.name)")
+              try {
+                if (!$key) { return $false }
+                @($key.GetValueNames() | Where-Object {
+                  $_ -match '^\d+\.\d+\.\d+$' -and ([version]$_).Major -eq $required.Major -and
+                  ([version]$_).Minor -eq $required.Minor -and [version]$_ -ge $required
+                }).Count -gt 0
+              } finally {
+                if ($key) { $key.Dispose() }
+                $base.Dispose()
+              }
+            }
+            if (!(& $compatible)) {
+              $name = if ($framework.name -eq 'Microsoft.NETCore.App') { 'dotnet-runtime.exe' } else { 'aspnetcore-runtime.exe' }
+              $process = Start-Process -FilePath (Join-Path $PWD "artifacts/prerequisites/$name") -ArgumentList '/install', '/quiet', '/norestart' -Wait -PassThru
+              if ($process.ExitCode -notin @(0, 3010)) { throw ".NET provisioning failed: $($process.ExitCode)" }
+            }
+            if (!(& $compatible)) { throw "Missing compatible shared framework: $($framework.name)" }
+          }
       - name: Test Windows installation and OTA as a standard user
         if: runner.os == 'Windows'
         run: ./tests/windows/as-standard-user.ps1 -Installer (Join-Path $PWD "artifacts/release/Strife-$env:STRIFE_VERSION-win-x64-Setup.exe")

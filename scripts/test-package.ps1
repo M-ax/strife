@@ -14,6 +14,8 @@ $previousEngine = $env:STRIFE_VOICE_ENGINE
 try {
     if ($IsWindows) {
         Expand-Archive (Join-Path $root "artifacts/release/Strife-$version-$Runtime.zip") $stage
+        . (Join-Path $PSScriptRoot 'windows-dotnet.ps1')
+        Assert-StrifePortableRuntime $stage
         $env:STRIFE_VOICE_ENGINE = Join-Path $stage 'voice/strife-voice.exe'
         $voiceInfoPath = Join-Path $stage 'voice/build-info.json'
         $releaseInfo = Get-Content (Join-Path $stage 'release.json') -Raw | ConvertFrom-Json

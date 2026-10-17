@@ -19,7 +19,10 @@ internal static class UpdateTests
             now.AddMinutes(-1), now.AddDays(30), 19041, "14.40.33810.0");
         byte[] Envelope(UpdateManifest value)
         {
-            var payload = JsonSerializer.SerializeToUtf8Bytes(value, UpdateManifest.Json);
+            var payload = JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions(UpdateManifest.Json)
+            {
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            });
             return JsonSerializer.SerializeToUtf8Bytes(new UpdateEnvelope(Convert.ToBase64String(payload),
                 Convert.ToBase64String(key.SignData(payload, HashAlgorithmName.SHA256, RSASignaturePadding.Pss))), UpdateManifest.Json);
         }
@@ -32,6 +35,43 @@ internal static class UpdateTests
         }
         check(UpdateManifest.Verify(Envelope(manifest), key.ExportSubjectPublicKeyInfoPem(), "preview", now) == manifest,
             "signed update metadata round trips");
+        DotNetFrameworkRequirement[] frameworks =
+        [
+            new("Microsoft.NETCore.App", "10.0.2"),
+            new("Microsoft.AspNetCore.App", "10.0.3")
+        ];
+        var frameworkManifest = manifest with { Schema = 2, DotNetFrameworks = frameworks };
+        check(UpdateManifest.Verify(Envelope(frameworkManifest), key.ExportSubjectPublicKeyInfoPem(), "preview", now)
+            .DotNetFrameworks!.SequenceEqual(frameworks), "schema 2 preserves exact framework requirements");
+        foreach (var invalid in new[]
+        {
+            manifest with { Schema = 3 },
+            manifest with { DotNetFrameworks = frameworks },
+            frameworkManifest with { DotNetFrameworks = [] },
+            frameworkManifest with { DotNetFrameworks = [frameworks[0]] },
+            frameworkManifest with { DotNetFrameworks = [frameworks[0], frameworks[0]] },
+            frameworkManifest with { DotNetFrameworks = [frameworks[0], new("Microsoft.WindowsDesktop.App", "10.0.3")] },
+            frameworkManifest with { DotNetFrameworks = [frameworks[0], null!] }
+        }) Reject(() => UpdateManifest.Verify(Envelope(invalid), key.ExportSubjectPublicKeyInfoPem(), "preview", now),
+            "reject unsupported or incomplete framework metadata");
+        foreach (var invalid in new[] { "10.0", "10.0.0.1", "10.0.0-preview.1", "10.0.0+build", "010.0.0",
+            "10.0.-1", "10.0.0\n", "2147483648.0.0", "", null })
+            Reject(() => UpdateManifest.Verify(Envelope(frameworkManifest with
+            {
+                DotNetFrameworks = [frameworks[0], new("Microsoft.AspNetCore.App", invalid!)]
+            }), key.ExportSubjectPublicKeyInfoPem(), "preview", now), "reject non-stable framework versions");
+        check(DotNetFrameworkRequirement.Satisfied(frameworks, name =>
+            name == "Microsoft.NETCore.App" ? ["10.0.2"] : ["10.0.3"]), "exact shared framework versions satisfy requirements");
+        check(DotNetFrameworkRequirement.Satisfied(frameworks, _ => ["9.0.20", "10.0.10", "11.0.0"]),
+            "newer patch satisfies each framework among side-by-side versions");
+        foreach (var installed in new[] { Array.Empty<string>(), new[] { "10.0.1" }, new[] { "9.0.99" },
+            new[] { "11.0.0" }, new[] { "10.1.0" }, new[] { "10.0.3-preview.1", "10.0.3.0" } })
+            check(!DotNetFrameworkRequirement.Satisfied(frameworks, _ => installed),
+                "missing, older, different major/minor, and prerelease runtimes cannot satisfy update");
+        check(!DotNetFrameworkRequirement.Satisfied(frameworks, name =>
+            name == "Microsoft.NETCore.App" ? ["10.0.10"] : []), "NETCore alone cannot replace missing ASP.NET runtime");
+        check(!DotNetFrameworkRequirement.Satisfied(frameworks, name =>
+            name == "Microsoft.AspNetCore.App" ? ["10.0.10"] : []), "ASP.NET alone cannot replace missing NETCore runtime");
         Reject(() => UpdateManifest.Verify(Envelope(manifest), wrongKey.ExportSubjectPublicKeyInfoPem(), "preview", now), "reject wrong update key");
         Reject(() => UpdateManifest.Verify(Envelope(manifest), key.ExportSubjectPublicKeyInfoPem(), "stable", now), "reject cross-channel update");
         Reject(() => UpdateManifest.Verify(Envelope(manifest), key.ExportSubjectPublicKeyInfoPem(), "preview", now, now), "reject replayed update");

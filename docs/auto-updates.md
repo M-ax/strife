@@ -33,10 +33,59 @@ installations. This one-time manual transition preserves the user's profile.
 Users must run Setup as their intended account, without "Run as administrator".
 
 WebView2 detection accepts machine-wide or current-user runtimes. Interactive
-Setup can elevate the bundled VC++ prerequisite alone; silent Setup refuses
+Setup can elevate the VC++ prerequisite alone; silent Setup refuses
 missing/outdated VC++ without UAC. This means an unattended update requiring a
 newer VC++ runtime must defer to an explicit interactive repair, not loop.
 The portable ZIP remains unchanged and does not opt into automatic updates.
+
+### Upcoming online Setup (not yet published)
+
+Previously published installers bundle the Microsoft prerequisites. The upcoming
+installed Windows app and OTA package will become framework-dependent. Setup
+will bundle the app and native voice engine, but download Microsoft's .NET
+Runtime and ASP.NET Core Runtime for Windows x64 when absent or incompatible.
+The app uses `Microsoft.NET.Sdk.Web`, requiring both `Microsoft.NETCore.App` and
+`Microsoft.AspNetCore.App`. Requirements will come from the generated
+runtimeconfig: each framework must match the required major/minor version and
+have a patch version greater than or equal to the required patch.
+Setup will also fetch Microsoft's WebView2 x64 standalone installer and Visual
+C++ x64 Redistributable only when missing or outdated.
+Internet access will be required for those downloads; no separate offline
+installer will be retained.
+
+Packaging will download the prerequisite installers from Microsoft and validate their
+Microsoft Authenticode signatures, then pin their resolved, versioned HTTPS
+URLs and SHA-256 hashes into Setup. Setup will verify each downloaded file's
+hash before execution. `-PrerequisiteDirectory` will be download staging
+refreshed on every packaging run, not an offline cache.
+
+.NET runtimes install machine-wide and may request UAC approval, as can VC++.
+Run Setup normally as the intended user; the app remains per-user. Silent Setup
+will refuse missing/incompatible .NET runtimes without requesting elevation,
+just as it refuses missing/outdated VC++. Unattended updates must defer to an
+explicit interactive repair when prerequisites are incompatible.
+
+The Windows portable ZIP will remain fully self-contained with .NET and voice
+exactly as before, with its existing external WebView2/VC++ requirements unchanged.
+Linux and macOS will remain self-contained. These packages remain manual-update only.
+
+Upcoming signed **schema 2** feeds will carry `dotNetFrameworks` derived from the
+generated runtimeconfig so compatible clients can check both required frameworks.
+Old schema 1 clients reject schema 2; **one manual upgrade using the new Setup
+is required** to transition safely, even for existing updater-capable installs.
+Do not auto-ship a thin, framework-dependent payload to old clients in a schema 1
+feed. This transition is not yet released; the schema 1 description below
+documents the existing contract.
+
+For manual installation or repair, use Microsoft's official
+[WebView2 x64 standalone installer](https://go.microsoft.com/fwlink/?linkid=2124701)
+and [Visual C++ x64 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+For .NET, use the official [.NET 10 download page](https://dotnet.microsoft.com/en-us/download/dotnet/10.0):
+select **.NET Runtime** and **ASP.NET Core Runtime**, both **Windows x64**.
+Neither the SDK nor the Hosting Bundle is necessary.
+The installed VC++ runtime must meet the minimum version required by the
+particular Strife build; any installed v14 version is not automatically enough.
+These convenience links are not the versioned URLs pinned into Setup.
 
 ## Authentication and background policy
 

@@ -6,9 +6,38 @@ using Velopack;
 namespace Strife;
 
 public sealed record UpdateEnvelope(string Payload, string Signature);
+public sealed record DotNetFrameworkRequirement(string Name, string Version)
+{
+    internal static bool TryVersion(string? text, out System.Version? version)
+    {
+        version = null;
+        return Regex.IsMatch(text ?? "", @"\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z")
+            && System.Version.TryParse(text, out version);
+    }
+
+    public static bool Valid(IReadOnlyList<DotNetFrameworkRequirement>? requirements) =>
+        requirements is { Count: 2 }
+        && requirements.All(r => r is not null
+            && r.Name is "Microsoft.NETCore.App" or "Microsoft.AspNetCore.App"
+            && TryVersion(r.Version, out _))
+        && requirements.Select(r => r.Name).Distinct(StringComparer.Ordinal).Count() == 2;
+
+    // Installed versions must come from the target architecture's shared frameworks,
+    // never Environment.Version (which can describe our private self-contained runtime).
+    public static bool Satisfied(IReadOnlyList<DotNetFrameworkRequirement>? requirements,
+        Func<string, IEnumerable<string>> installedVersions) =>
+        Valid(requirements) && requirements!.All(r =>
+        {
+            TryVersion(r.Version, out var required);
+            return installedVersions(r.Name).Any(text => TryVersion(text, out var installed)
+                && installed!.Major == required!.Major && installed.Minor == required.Minor
+                && installed.Build >= required.Build);
+        });
+}
+
 public sealed record UpdateManifest(int Schema, string Channel, string Version, string FileName,
     long Bytes, string Sha256, string SourceRef, DateTimeOffset IssuedAt, DateTimeOffset ExpiresAt,
-    int MinimumWindowsBuild, string MinimumVcRuntime)
+    int MinimumWindowsBuild, string MinimumVcRuntime, DotNetFrameworkRequirement[]? DotNetFrameworks = null)
 {
     public const int MaximumEnvelopeBytes = 32768;
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -33,7 +62,9 @@ public sealed record UpdateManifest(int Schema, string Channel, string Version, 
             throw new InvalidDataException("Update signature is invalid.");
         var manifest = JsonSerializer.Deserialize<UpdateManifest>(payload, Json)
             ?? throw new InvalidDataException("Missing update payload.");
-        if (manifest.Schema != 1 || channel is not ("stable" or "preview") || manifest.Channel != channel
+        if (!(manifest.Schema == 1 ? manifest.DotNetFrameworks is null
+                : manifest.Schema == 2 && DotNetFrameworkRequirement.Valid(manifest.DotNetFrameworks))
+            || channel is not ("stable" or "preview") || manifest.Channel != channel
             || manifest.IssuedAt > now.AddMinutes(10) || requireFresh && manifest.ExpiresAt <= now
             || manifest.ExpiresAt <= manifest.IssuedAt || manifest.ExpiresAt > manifest.IssuedAt.AddDays(45)
             || highWater is { } previous && manifest.IssuedAt < previous

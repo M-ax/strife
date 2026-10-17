@@ -6,12 +6,56 @@ All four native builds must succeed before any assets are attached. Rerunning th
 
 | Target | Release asset | Runtime requirements |
 | --- | --- | --- |
-| Windows x64 | `Strife-VERSION-win-x64-Setup.exe` and portable `.zip` | Windows 10 build 19041+ or Windows 11; setup includes WebView2 and VC++ prerequisites |
+| Windows x64 | `Strife-VERSION-win-x64-Setup.exe` and portable `.zip` | Windows 10 build 19041+ or Windows 11; WebView2 and VC++ x64 required (upcoming Setup downloads them only when needed) |
 | Linux x64 | `Strife-VERSION-linux-x64.tar.gz` | Ubuntu 24.04 x64 baseline, GTK 3, WebKitGTK 4.1, audio and X11 libraries |
 | macOS Intel | `Strife-VERSION-osx-x64.zip` containing `Strife.app` | macOS 14+ |
 | macOS Apple Silicon | `Strife-VERSION-osx-arm64.zip` containing `Strife.app` | macOS 14+ |
 
-The ZIP/tar archives include .NET, the voice engine, UI assets and dependency notices. The Windows portable ZIP needs WebView2 and the VC++ runtime already installed; the setup executable embeds both standalone redistributables for offline installation. Their Microsoft Authenticode signatures are verified during packaging. The installer checks runtime presence/version, reports prerequisite failures, handles restart requests, provides shortcuts and Apps & Features registration, removes obsolete runtime files on upgrade, rejects numeric version downgrades, and preserves profiles on uninstall.
+The ZIP/tar archives include .NET, the voice engine, UI assets and dependency notices. The Windows portable ZIP needs WebView2 and the VC++ runtime already installed. Previously published setup executables embed both standalone redistributables for offline installation, with Microsoft Authenticode signatures verified during packaging. The installer checks runtime presence/version, reports prerequisite failures, handles restart requests, provides shortcuts and Apps & Features registration, removes obsolete runtime files on upgrade, rejects numeric version downgrades, and preserves profiles on uninstall.
+
+## Upcoming: Online Windows installer (not yet published)
+
+Installed Windows builds and OTA packages will become framework-dependent.
+Setup will bundle the app and native voice engine, and download Microsoft's
+.NET Runtime and ASP.NET Core Runtime for Windows x64 when absent or incompatible.
+The app uses `Microsoft.NET.Sdk.Web`, so both `Microsoft.NETCore.App` and
+`Microsoft.AspNetCore.App` are required. Requirements will be read from the
+generated runtimeconfig: each framework must match the required major/minor
+version and have a patch version greater than or equal to the required patch.
+Setup will also download Microsoft's WebView2 x64 standalone installer and
+Visual C++ x64 Redistributable only when missing or outdated.
+Those downloads require internet access; no separate offline installer will be
+retained. This describes the upcoming installer, not the published downloads.
+
+Packaging will download the prerequisite installers from Microsoft, validate their Microsoft
+Authenticode signatures, and pin the resolved, versioned HTTPS URLs and SHA-256
+hashes into Setup. At installation time, Setup will verify each downloaded
+file's hash before execution. The convenience links below are for manual use,
+not mutable URLs to be embedded in Setup.
+
+Official manual downloads: [WebView2 x64 standalone installer](https://go.microsoft.com/fwlink/?linkid=2124701)
+and [Visual C++ x64 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+For .NET, use the official [.NET 10 download page](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
+and select **.NET Runtime** and **ASP.NET Core Runtime**, both **Windows x64**.
+Neither the SDK nor the Hosting Bundle is necessary.
+The installed VC++ runtime must meet the minimum version required by the
+particular Strife build; an older installed v14 runtime is not sufficient.
+
+The app will remain per-user and preserve profiles: run Setup normally, not as
+administrator. .NET runtimes install machine-wide and may request UAC, as can
+the VC++ prerequisite. Silent Setup will refuse missing/incompatible .NET or
+missing/outdated VC++ without requesting elevation.
+
+The Windows portable ZIP will remain fully self-contained with .NET and voice
+exactly as before, with the same external WebView2/VC++ requirements. Linux and
+macOS packages will remain self-contained too.
+
+Upcoming signed schema 2 feeds will carry `dotNetFrameworks`. Old schema 1
+clients reject schema 2, requiring one manual upgrade using the new Setup to
+transition safely. Do not publish a framework-dependent payload in a schema 1
+feed for old clients. See [OTA transition requirements](auto-updates.md).
+The historical release descriptions below retain their original bundled-
+prerequisite behavior.
 
 ## Preview 0.1.0-preview.9: Clearer voice status and panel headers
 
@@ -163,7 +207,7 @@ tar -xzf Strife-VERSION-linux-x64.tar.gz
 ./Strife/Strife
 ```
 
-Use `-BuildVoice` with publish to rebuild native code first, or `-NoPackage` to publish only the runnable directory. `-OutputDirectory` accepts an empty destination; the default disposable `artifacts/Strife` is rebuilt on every publish to exclude stale files. `-VoiceDirectory` selects an already staged engine; its build metadata must match the runtime, pinned source and current native input fingerprint. `-InnoSetupCompiler` overrides the ISCC path. `-PrerequisiteDirectory` can supply cached Microsoft offline installers. Packages are always written to `artifacts/release`.
+Use `-BuildVoice` with publish to rebuild native code first, or `-NoPackage` to publish only the runnable directory. `-OutputDirectory` accepts an empty destination; the default disposable `artifacts/Strife` is rebuilt on every publish to exclude stale files. `-VoiceDirectory` selects an already staged engine; its build metadata must match the runtime, pinned source and current native input fingerprint. `-InnoSetupCompiler` overrides the ISCC path. For the upcoming online installer, `-PrerequisiteDirectory` will select download staging refreshed on every packaging run, not an offline cache. Packages are always written to `artifacts/release`.
 
 ## Validation and signing
 

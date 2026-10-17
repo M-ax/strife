@@ -178,6 +178,12 @@ public sealed class AppUpdates : IDisposable
         lock (sync)
         {
             if (stopped) return;
+            if (!Compatible(manifest))
+            {
+                ready = null;
+                Set(new("manual", manifest.Version, Error: "This update needs a newer Windows or Microsoft runtime. Install it from strife.zip."));
+                return;
+            }
             ready = manifest;
             Set(new("ready", manifest.Version, 100));
         }
@@ -240,7 +246,18 @@ public sealed class AppUpdates : IDisposable
         using var runtime = machine.OpenSubKey(@"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64");
         return runtime?.GetValue("Installed") is int installed && installed == 1
             && System.Version.TryParse((runtime.GetValue("Version") as string)?.TrimStart('v'), out var version)
-            && version >= System.Version.Parse(manifest.MinimumVcRuntime);
+            && version >= System.Version.Parse(manifest.MinimumVcRuntime)
+            && (manifest.Schema == 1 ? manifest.DotNetFrameworks is null
+                : manifest.Schema == 2 && DotNetFrameworkRequirement.Satisfied(manifest.DotNetFrameworks, name =>
+                {
+                    if (!OperatingSystem.IsWindows()) return [];
+                    // .NET registers shared frameworks in the 32-bit view;
+                    // the x64 path, not the registry view, selects architecture.
+                    using var dotNet = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry32);
+                    using var framework = dotNet.OpenSubKey(
+                        @"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\" + name);
+                    return framework?.GetValueNames() ?? [];
+                }));
     }
 
     private static bool IsPerUserInstall()

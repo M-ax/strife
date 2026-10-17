@@ -58,7 +58,25 @@ Copy-Item (Join-Path $root 'docs') $output -Recurse -Force
     developmentStreaming = [bool]$IncludeDevelopmentStreaming } | ConvertTo-Json | Set-Content (Join-Path $output 'release.json')
 if (!$NoPackage) {
     if ($IsWindows) {
-        & (Join-Path $PSScriptRoot 'package-windows.ps1') -PublishDirectory $output -Version $Version -InnoSetupCompiler $InnoSetupCompiler -PrerequisiteDirectory $PrerequisiteDirectory
+        # Keep the portable output untouched. Setup and OTA use a separate,
+        # freshly published payload, never a self-contained tree with DLLs removed.
+        $installed = Join-Path $root 'artifacts/Strife-installed'
+        $portablePath = [IO.Path]::GetFullPath($output).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        $installedPath = [IO.Path]::GetFullPath($installed).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if ($portablePath.StartsWith($installedPath, [StringComparison]::OrdinalIgnoreCase) -or
+            $installedPath.StartsWith($portablePath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'OutputDirectory must not overlap the reserved installed staging directory.'
+        }
+        Reset-StrifeStagingDirectory $installed
+        & dotnet publish (Join-Path $root 'src/Strife.Desktop/Strife.Desktop.csproj') -c Release -r $Runtime --self-contained false "-p:Version=$Version" -p:RollForward=LatestPatch -p:AppHostDotNetSearch=Global -p:DebugType=None -p:DebugSymbols=false -o $installed
+        if ($LASTEXITCODE) { throw 'Framework-dependent desktop publish failed.' }
+        foreach ($name in @('voice', 'docs', 'README.md', 'THIRD-PARTY-NOTICES.md', 'release.json')) {
+            Copy-Item -LiteralPath (Join-Path $output $name) -Destination $installed -Recurse -Force
+        }
+        if ($IncludeDevelopmentStreaming) {
+            Copy-Item -LiteralPath (Join-Path $output 'streaming') -Destination $installed -Recurse
+        }
+        & (Join-Path $PSScriptRoot 'package-windows.ps1') -PublishDirectory $output -InstalledDirectory $installed -Version $Version -InnoSetupCompiler $InnoSetupCompiler -PrerequisiteDirectory $PrerequisiteDirectory
     } else {
         & (Join-Path $PSScriptRoot 'package-unix.ps1') -PublishDirectory $output -Runtime $Runtime -Version $Version
     }

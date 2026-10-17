@@ -39,6 +39,15 @@ try {
         foreach ($file in @('Strife.exe', 'voice/strife-voice.exe', 'voice/rnnoise.dll', 'voice/speexdsp.dll', 'wwwroot/index.html')) {
             if (!(Test-Path (Join-Path $current $file))) { throw "Installer omitted $file." }
         }
+        . (Join-Path $root 'scripts/windows-dotnet.ps1')
+        $frameworks = @(Get-StrifeDotNetFrameworks $current)
+        $requirements = Get-Content (Join-Path $root 'artifacts/release/update-requirements.json') -Raw | ConvertFrom-Json
+        foreach ($framework in $frameworks) {
+            $expected = @($requirements.dotNetFrameworks | Where-Object name -CEQ $framework.name)
+            if ($expected.Count -ne 1 -or $expected[0].version -ne $framework.version) {
+                throw 'Installed runtime requirements differ from OTA requirements.'
+            }
+        }
         if (!(Test-Path (Join-Path $application 'Update.exe'))) { throw 'Updater/uninstaller is missing.' }
         if (!(Test-Path $registry)) { throw 'Per-user Apps & Features registration is missing.' }
         if (!(Test-Path $shortcut)) { throw 'Per-user Start Menu shortcut is missing.' }
@@ -51,6 +60,32 @@ try {
             'old payload' | Set-Content (Join-Path $current 'voice/obsolete.txt')
         } elseif ((Test-Path (Join-Path $current 'obsolete.dll')) -or (Test-Path (Join-Path $current 'voice/obsolete.txt'))) {
             throw 'Upgrade left obsolete application files behind.'
+        }
+    }
+    # Launch the actual framework-dependent apphost, not `dotnet run`: otherwise
+    # an SDK or the test harness could hide broken global runtime discovery.
+    $previousProfile = $env:STRIFE_PROFILE
+    $env:STRIFE_PROFILE = Join-Path $stage 'desktop-profile'
+    $desktop = $null
+    try {
+        $desktop = Start-Process (Join-Path $current 'Strife.exe') -PassThru
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        $listener = $null
+        do {
+            if ($desktop.HasExited) { throw "Installed desktop exited early: $($desktop.ExitCode)." }
+            $listener = Get-NetTCPConnection -OwningProcess $desktop.Id -State Listen -ErrorAction SilentlyContinue |
+                Where-Object LocalAddress -EQ '127.0.0.1' | Select-Object -First 1
+            if (!$listener) { Start-Sleep -Milliseconds 250 }
+        } while (!$listener -and [DateTime]::UtcNow -lt $deadline)
+        if (!$listener) { throw 'Installed desktop did not start its local web host.' }
+        $page = Invoke-WebRequest "http://127.0.0.1:$($listener.LocalPort)/"
+        if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'Strife') { throw 'Installed desktop assets failed to load.' }
+        Write-Host 'PASS: installed framework-dependent desktop launches and serves UI assets.'
+    } finally {
+        $env:STRIFE_PROFILE = $previousProfile
+        if ($desktop) {
+            if (!$desktop.HasExited) { $desktop.Kill($true); $desktop.WaitForExit() }
+            $desktop.Dispose()
         }
     }
     $env:STRIFE_VOICE_ENGINE = Join-Path $current 'voice/strife-voice.exe'

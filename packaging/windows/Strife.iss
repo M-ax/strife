@@ -33,8 +33,6 @@ RestartApplications=no
 SetupLogging=yes
 
 [Files]
-Source: "{#PrerequisiteDir}\VC_redist.x64.exe"; Flags: dontcopy
-Source: "{#PrerequisiteDir}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; Flags: dontcopy
 Source: "{#VelopackSetup}"; DestName: "Strife-Payload-Setup.exe"; Flags: dontcopy
 
 [Run]
@@ -48,6 +46,14 @@ const
 var
   PrerequisiteRestart: Boolean;
   PackageInstalled: Boolean;
+  DownloadPage: TDownloadWizardPage;
+
+procedure InitializeWizard;
+begin
+  DownloadPage := CreateDownloadPage('Downloading Windows prerequisites',
+    'Strife downloads missing runtimes from Microsoft. An internet connection is required.', nil);
+  DownloadPage.ShowBaseNameInsteadOfUrl := True;
+end;
 
 function InitializeSetup: Boolean;
 var
@@ -105,7 +111,38 @@ begin
   end;
 end;
 
-function InstallPrerequisite(const FileName, Arguments: String; RequiresElevation: Boolean): String;
+function HasDotNetFramework(const Name, Required: String): Boolean;
+var
+  Versions: TArrayOfString;
+  I, J, Dots: Integer;
+  Stable: Boolean;
+  InstalledVersion, RequiredVersion: Int64;
+begin
+  Result := False;
+  if not StrToVersion(Required, RequiredVersion) then Exit;
+  { Global x64 frameworks only; x86/Arm64 and private SDK/runtime copies cannot
+    satisfy the apphost's Global search policy. Match LatestPatch roll-forward. }
+  { Microsoft registers all architectures in the 32-bit registry view. }
+  if not RegGetValueNames(HKLM32,
+    'SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\' + Name, Versions) then Exit;
+  for I := 0 to GetArrayLength(Versions) - 1 do
+  begin
+    Stable := True;
+    Dots := 0;
+    for J := 1 to Length(Versions[I]) do
+      if Versions[I][J] = '.' then Dots := Dots + 1
+      else if (Versions[I][J] < '0') or (Versions[I][J] > '9') then Stable := False;
+    if Stable and (Dots = 2) and StrToVersion(Versions[I], InstalledVersion) then
+      if ((InstalledVersion shr 32) = (RequiredVersion shr 32)) and
+        (ComparePackedVersion(InstalledVersion, RequiredVersion) >= 0) then
+      begin
+        Result := True;
+        Exit;
+      end;
+  end;
+end;
+
+function InstallPrerequisite(const FileName, Arguments, Url, SHA256: String; RequiresElevation: Boolean): String;
 var
   ExitCode: Integer;
   Started: Boolean;
@@ -114,10 +151,26 @@ begin
   { A background update must never trigger UAC or launch prerequisite UI. }
   if RequiresElevation and WizardSilent then
   begin
-    Result := 'The Microsoft Visual C++ Runtime needs installation or repair. Run Setup interactively to authorize this prerequisite.';
+    Result := FileName + ' needs installation or repair. Run Setup interactively to authorize this Microsoft prerequisite.';
     Exit;
   end;
-  ExtractTemporaryFile(FileName);
+  DownloadPage.Clear;
+  DownloadPage.Add(Url, FileName, SHA256);
+  DownloadPage.Show;
+  try
+    try
+      { Packaging validates Microsoft's Authenticode signature. The pinned CDN
+        URL and SHA-256 ensure we execute exactly those validated bytes. }
+      DownloadPage.Download;
+    except
+      Log(GetExceptionMessage);
+      Result := 'Could not download or verify ' + FileName +
+        '. Check your internet connection and retry Setup, or install the runtime from Microsoft using the links in the Strife Windows download section.';
+      Exit;
+    end;
+  finally
+    DownloadPage.Hide;
+  end;
   if RequiresElevation then
     Started := ShellExec('runas', ExpandConstant('{tmp}\') + FileName, Arguments, '', SW_HIDE, ewWaitUntilTerminated, ExitCode)
   else
@@ -138,7 +191,8 @@ begin
   if not HasVCRuntime then
   begin
     WizardForm.StatusLabel.Caption := 'Installing Microsoft Visual C++ Runtime...';
-    Result := InstallPrerequisite('VC_redist.x64.exe', '/install /quiet /norestart', True);
+    Result := InstallPrerequisite('VC_redist.x64.exe', '/install /quiet /norestart',
+      '{#VCRedistUrl}', '{#VCRedistSHA256}', True);
     if Result <> '' then Exit;
     if not HasVCRuntime then
     begin
@@ -150,12 +204,39 @@ begin
   if not HasWebView2 then
   begin
     WizardForm.StatusLabel.Caption := 'Installing Microsoft Edge WebView2 Runtime...';
-    Result := InstallPrerequisite('MicrosoftEdgeWebView2RuntimeInstallerX64.exe', '/silent /install', False);
+    Result := InstallPrerequisite('MicrosoftEdgeWebView2RuntimeInstallerX64.exe', '/silent /install',
+      '{#WebViewUrl}', '{#WebViewSHA256}', False);
     if Result <> '' then Exit;
     if not HasWebView2 then
       Result := 'Microsoft Edge WebView2 Runtime could not be verified. Install it and run Setup again.';
   end;
   if Result <> '' then Exit;
+  if not HasDotNetFramework('Microsoft.NETCore.App', '{#DotNetVersion}') then
+  begin
+    WizardForm.StatusLabel.Caption := 'Installing Microsoft .NET Runtime...';
+    Result := InstallPrerequisite('dotnet-runtime.exe', '/install /quiet /norestart',
+      '{#DotNetUrl}', '{#DotNetSHA256}', True);
+    if Result <> '' then Exit;
+    if not HasDotNetFramework('Microsoft.NETCore.App', '{#DotNetVersion}') then
+    begin
+      Result := 'The Microsoft .NET Runtime could not be verified. Restart Windows and run Setup again.';
+      NeedsRestart := PrerequisiteRestart;
+      Exit;
+    end;
+  end;
+  if not HasDotNetFramework('Microsoft.AspNetCore.App', '{#AspNetVersion}') then
+  begin
+    WizardForm.StatusLabel.Caption := 'Installing Microsoft ASP.NET Core Runtime...';
+    Result := InstallPrerequisite('aspnetcore-runtime.exe', '/install /quiet /norestart',
+      '{#AspNetUrl}', '{#AspNetSHA256}', True);
+    if Result <> '' then Exit;
+    if not HasDotNetFramework('Microsoft.AspNetCore.App', '{#AspNetVersion}') then
+    begin
+      Result := 'The Microsoft ASP.NET Core Runtime could not be verified. Restart Windows and run Setup again.';
+      NeedsRestart := PrerequisiteRestart;
+      Exit;
+    end;
+  end;
   if not PackageInstalled then
   begin
     WizardForm.StatusLabel.Caption := 'Installing Strife for your account...';
