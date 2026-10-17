@@ -45,4 +45,6 @@ async function main() {
   console.log(`Signed ${channel} update ${version} from ${sourceRef}.`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+// Node resolves module URLs through symlinks (including macOS /var -> /private/var).
+// Let Node identify the entry point rather than comparing lexical paths.
+if (import.meta.main) await main();

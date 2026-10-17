@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, mkdir, copyFile, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, copyFile, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -33,6 +33,10 @@ test('signing and renewal fail closed and preserve schema/runtime requirements',
     for (const script of ['sign-update.mjs', 'renew-update.mjs']) {
       await copyFile(new URL(`../../scripts/${script}`, import.meta.url), path.join(root, 'scripts', script));
     }
+    // Exercise entry-point detection through an alias on every platform, not
+    // only machines whose temporary directory already contains symlinks.
+    const scriptAlias = path.join(root, 'script-alias');
+    await symlink(path.join(root, 'scripts'), scriptAlias, 'junction');
     const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     await writeFile(path.join(root, 'src/Strife.Desktop/update-key.pem'), publicKey.export({ type: 'spki', format: 'pem' }));
     const options = { padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 };
@@ -43,7 +47,7 @@ test('signing and renewal fail closed and preserve schema/runtime requirements',
     const feedPath = path.join(root, 'windows-preview.json');
     const requirements = { minimumVcRuntime: '14.40.33810.0', dotNetFrameworks: frameworks };
     const run = script => spawnSync(process.execPath,
-      [path.join(root, 'scripts', script), root, version, 'a'.repeat(40)], { env, encoding: 'utf8' });
+      [path.join(scriptAlias, script), root, version, 'a'.repeat(40)], { env, encoding: 'utf8' });
     const succeed = script => {
       const result = run(script);
       assert.equal(result.status, 0, result.stderr);
