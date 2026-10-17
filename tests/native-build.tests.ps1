@@ -73,6 +73,11 @@ diff --git a/src/mumble/XboxInput.cpp b/src/mumble/XboxInput.cpp
     $target = Join-Path $snapshot 'src/mumble/XboxInput.cpp'
     Check ([IO.File]::ReadAllText($target) -ceq "fixed`n") 'the patch is applied to the private snapshot'
     Check ([IO.File]::ReadAllText((Join-Path $upstream 'src/mumble/XboxInput.cpp')) -ceq "original`n") 'the source checkout is never patched'
+    [IO.File]::WriteAllText($patch, $diff.Replace("`r`n", "`n").Replace("`n", "`r`n"))
+    [IO.File]::WriteAllText((Join-Path $upstream 'src/mumble/XboxInput.cpp'), "original`r`n")
+    Update-StrifeXInputSources $fixture $upstream $snapshot $patch
+    Check ([IO.File]::ReadAllText($target) -ceq "fixed`n") 'CRLF patches and upstream files produce the same LF snapshot'
+    Check ([IO.File]::ReadAllText((Join-Path $upstream 'src/mumble/XboxInput.cpp')) -ceq "original`r`n") 'Windows source line endings remain untouched'
     [IO.File]::SetLastWriteTimeUtc($target, [DateTime]::new(2001, 1, 1, 0, 0, 0, [DateTimeKind]::Utc))
     $written = [IO.File]::GetLastWriteTimeUtc($target)
     Update-StrifeXInputSources $fixture $upstream $snapshot $patch

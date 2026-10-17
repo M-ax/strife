@@ -55,9 +55,11 @@ function Update-StrifeXInputSources(
         $gitRoot = (& git -C $Root rev-parse --show-toplevel).Trim()
         if ($LASTEXITCODE) { throw 'Cannot locate the Strife checkout for native patch application.' }
         $relativeStage = [IO.Path]::GetRelativePath($gitRoot, $stage).Replace('\', '/')
-        & git -C $gitRoot apply --check "--directory=$relativeStage" $PatchPath
+        $stagedPatch = Join-Path $stage 'backport.patch'
+        Write-Changed $stagedPatch ([IO.File]::ReadAllText($PatchPath).Replace("`r`n", "`n"))
+        & git -C $gitRoot apply --check "--directory=$relativeStage" $stagedPatch
         if ($LASTEXITCODE) { throw 'The XInput backport does not match the pinned Mumble source.' }
-        & git -C $gitRoot apply "--directory=$relativeStage" $PatchPath
+        & git -C $gitRoot apply "--directory=$relativeStage" $stagedPatch
         if ($LASTEXITCODE) { throw 'Cannot apply the XInput reconnect backport.' }
         # Always patch pristine inputs, then preserve unchanged snapshot timestamps.
         $contents = @{}
